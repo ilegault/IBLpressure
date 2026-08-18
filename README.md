@@ -53,7 +53,7 @@ No hardware? Tick **Simulation mode** in the GUI — the app generates plausible
 ## Install labjack driver
 
 
-The target PC also needs the LabJack **LJM** driver: https://support.labjack.com/docs/ljm-software-installer
+The target PC also needs the LabJack **LJM** driver: https://support.labjack.com/docs/ljm-software-installer-windows
 
 Without it the app opens in Simulation mode only.
 
