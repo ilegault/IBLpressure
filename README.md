@@ -30,12 +30,6 @@ Wiring lives in `ibl/channels.py`.
 
 The T7 saturates just past 10 V, so 10 V is the practical ceiling — neither gauge ever legitimately reaches it (IG tops at 9 V, Convectron at 5.66 V).
 
-Verify the maths against the manual's own tables:
-
-```
-python -m ibl.conversion
-```
-
 ---
 
 ## GUI
@@ -51,40 +45,18 @@ python -m ibl.conversion
 
 One file per day: `YYYY-MM-DD.csv` in the configured folder (`data\` by default). Default write interval: every 10 s. Faulted channels are written as `Gauge Fault` (never a number). Optionally records raw volts too.
 
----
-
-## Running from source
-
-```bash
-pip install -r requirements.txt
-python -m ibl
-```
 
 No hardware? Tick **Simulation mode** in the GUI — the app generates plausible drifting pressures for all 14 channels.
 
 ---
 
-## Building the Windows executable
+## Install labjack driver
 
-```bat
-build.bat
-```
-
-Output: `dist\IBLpressure\IBLpressure.exe` (one-folder bundle, copy the whole folder).
 
 The target PC also needs the LabJack **LJM** driver: https://support.labjack.com/docs/ljm-software-installer
 
 Without it the app opens in Simulation mode only.
 
----
-
-## Smoke test
-
-Runs the full GUI off-screen for 3 s in simulation mode and confirms CSV rows land on disk:
-
-```bash
-python smoke_test.py
-```
 
 ---
 
