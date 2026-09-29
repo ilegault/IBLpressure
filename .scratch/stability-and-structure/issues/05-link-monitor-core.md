@@ -7,7 +7,7 @@ window yet (ticket 06). Spec §2 *Link state*; CONTEXT.md *Link state*.
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
