@@ -7,7 +7,7 @@ Spec §2 *CSV*; CONTEXT.md *Daily CSV*.
 
 **Blocked by:** 07
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
@@ -50,3 +50,4 @@ Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pyte
 
 ## Comments
 - 2026-09-29: Implemented. `choose_daily_path`, `read_daily_csv`, `load_recent_history` in `csvlogger.py`; `_ensure_file` uses the path chooser; the window reloads History once in `__init__` before the worker starts. If lines are unreadable the label adds `(N unreadable lines skipped)` after the required text. Ticket stays in-progress until the PR merges.
+- 2026-09-29: PR merged, ticket set to done.
