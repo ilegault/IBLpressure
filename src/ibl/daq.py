@@ -23,9 +23,9 @@ import time
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 
-from .channels import CHANNELS, AIN_NAMES
+from .channels import AIN_NAMES, CHANNELS
 from .config import Settings
-from .conversion import convert, Reading
+from .conversion import Reading, convert
 
 # labjack-ljm is only needed for real hardware.  Import it lazily so the
 # program still starts (in Simulation mode) on a PC without the LJM driver.
@@ -33,7 +33,7 @@ try:
     from labjack import ljm  # type: ignore
     LJM_AVAILABLE = True
     LJM_IMPORT_ERROR = ""
-except Exception as exc:  # pragma: no cover - depends on the machine
+except Exception as exc:  # pragma: no cover - depends on the machine  # noqa: BLE001 - any failure is reported or handled here
     ljm = None  # type: ignore
     LJM_AVAILABLE = False
     LJM_IMPORT_ERROR = str(exc)
@@ -41,7 +41,7 @@ except Exception as exc:  # pragma: no cover - depends on the machine
 
 class Sample:
     """One sweep of all 14 channels."""
-    __slots__ = ("timestamp", "readings")
+    __slots__ = ("readings", "timestamp")
 
     def __init__(self, timestamp: float, readings: list[Reading]):
         self.timestamp = timestamp
@@ -142,7 +142,7 @@ class DaqWorker(QObject):
         if self._timer is None:
             return
         hz = max(0.05, min(float(self._settings.sample_hz), 20.0))
-        self._timer.setInterval(int(round(1000.0 / hz)))
+        self._timer.setInterval(round(1000.0 / hz))
 
     # -- device -------------------------------------------------------------
     def _open(self) -> None:
@@ -183,7 +183,7 @@ class DaqWorker(QObject):
                 f"Connected to T7 serial {serial} over {self._settings.connection}"
             )
             self.connection_changed.emit(True)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - any failure is reported or handled here
             self._handle = None
             self.status.emit(f"Could not open LabJack T7: {exc}")
             self.connection_changed.emit(False)
@@ -192,7 +192,7 @@ class DaqWorker(QObject):
         if self._handle is not None and LJM_AVAILABLE:
             try:
                 ljm.close(self._handle)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - pre-existing best-effort cleanup, error ignored
                 pass
             finally:
                 self._handle = None
@@ -213,13 +213,13 @@ class DaqWorker(QObject):
         if self._handle is not None and LJM_AVAILABLE:
             try:
                 ljm.close(self._handle)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - pre-existing best-effort cleanup, error ignored
                 pass
             self._handle = None
         if LJM_AVAILABLE:
             try:
                 ljm.closeAll()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - pre-existing best-effort cleanup, error ignored
                 pass
         self._sim = None
 
@@ -234,7 +234,7 @@ class DaqWorker(QObject):
             try:
                 volts = ljm.eReadNames(self._handle, len(AIN_NAMES), AIN_NAMES)
                 self._fail_count = 0
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - any failure is reported or handled here
                 self._fail_count += 1
                 self.status.emit(f"Read error ({self._fail_count}): {exc}")
                 if self._fail_count >= 3:
@@ -249,10 +249,10 @@ class DaqWorker(QObject):
             # Not connected.  If the LJM driver is present and we are not in
             # simulation mode, retry the connection every 5 seconds so a
             # USB glitch or a briefly-missing T7 recovers automatically.
-            if self._running and LJM_AVAILABLE and not self._settings.simulate:
-                if now - self._reconnect_at >= 5.0:
-                    self.status.emit("No T7 connection - retrying...")
-                    self._open()
+            if (self._running and LJM_AVAILABLE and not self._settings.simulate
+                    and now - self._reconnect_at >= 5.0):
+                self.status.emit("No T7 connection - retrying...")
+                self._open()
             return
 
         fault_v = float(self._settings.fault_volts)

@@ -140,15 +140,15 @@ def write_manifest(dist_app: Path) -> None:
     )
     total = sum(p.stat().st_size for p in files)
     lines = [
-        f"# IBL Pressure build manifest",
+        "# IBL Pressure build manifest",
         f"# files: {len(files) + 1}   (this manifest included)",
         f"# bytes: {total}",
-        f"#",
-        f"# On the control PC, a quick sanity check from cmd:",
-        f"#     dir /s /b /a-d  |  find /c /v \"\"",
+        "#",
+        "# On the control PC, a quick sanity check from cmd:",
+        "#     dir /s /b /a-d  |  find /c /v \"\"",
         f"# should print {len(files) + 1}.",
-        f"#",
-        f"# size  sha256  path",
+        "#",
+        "# size  sha256  path",
     ]
     for p in files:
         lines.append(f"{p.stat().st_size}  {sha256(p)}  {p.relative_to(dist_app).as_posix()}")

@@ -120,7 +120,7 @@ convenience.
 ## Code layout
 
 ```
-ibl/
+src/ibl/
   channels.py    — AIN → location / gauge type
   conversion.py  — volts → Torr, fault rules
   csvlogger.py   — daily CSV rotation
@@ -128,6 +128,8 @@ ibl/
   config.py      — Settings dataclass, settings.json load/save
   driver.py      — LJM driver check + one-click installer launch
   mainwindow.py  — the single PySide6 window
-smoke_test.py    — headless integration test
+tests/           — pytest suite (run `pytest -q`)
+main.py          — entry point (`python main.py`)
+pyproject.toml   — package metadata, pytest and ruff settings
 build.bat        — PyInstaller build script
 ```

@@ -20,29 +20,43 @@ it takes effect immediately and is remembered in settings.json.
 from __future__ import annotations
 
 import bisect
-import datetime as _dt
 import os
 import time
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QMetaObject, Qt, QThread, Signal, QTimer
+from PySide6.QtCore import QEvent, QMetaObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QFileDialog,
-    QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QMainWindow, QMessageBox, QPushButton, QSizePolicy,
-    QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
-from . import __version__
+from . import __version__, driver
 from .channels import CHANNELS
 from .config import Settings
-from .conversion import APPROX, FAULT, NEGATIVE, OK, OVER, UNDER
+from .conversion import APPROX, FAULT, NEGATIVE, OVER, UNDER
 from .csvlogger import DailyCsvLogger
-from .daq import DaqWorker, Sample, LJM_AVAILABLE
-from . import driver
-from .theme import LIGHT_THEME, DARK_THEME, CHANNEL_COLORS, TIME_SPANS
+from .daq import DaqWorker, Sample
+from .theme import CHANNEL_COLORS, DARK_THEME, LIGHT_THEME, TIME_SPANS
 
 # ---------------------------------------------------------------------------
 pg.setConfigOptions(antialias=True)
@@ -177,17 +191,17 @@ class CompactSpin(QWidget):
     def _format(self, v: float) -> str:
         if self._decimals > 0:
             return f"{v:.{self._decimals}f}{self._suffix}"
-        return f"{int(round(v))}{self._suffix}"
+        return f"{round(v)}{self._suffix}"
 
     def _format_plain(self, v: float) -> str:
         if self._decimals > 0:
             return f"{v:.{self._decimals}f}"
-        return str(int(round(v)))
+        return str(round(v))
 
     def value(self):
         if self._decimals > 0:
             return round(self._value, self._decimals)
-        return int(round(self._value))
+        return round(self._value)
 
     def setValue(self, v) -> None:
         v = max(self._min, min(self._max, float(v)))
@@ -618,7 +632,7 @@ class MainWindow(QMainWindow):
         self.spn_res.setValue(int(s.resolution_index))
         self.spn_hz.setValue(float(s.sample_hz))
         self.spn_fault.setValue(float(s.fault_volts))
-        self.spn_hist.setValue(max(1, int(round(s.history_s / 3600))))
+        self.spn_hist.setValue(max(1, round(s.history_s / 3600)))
         self.chk_csv.setChecked(s.csv_enabled)
         self.spn_csv.setValue(float(s.csv_interval_s))
         self.txt_csvdir.setText(s.csv_dir)
@@ -805,7 +819,7 @@ class MainWindow(QMainWindow):
         try:
             os.makedirs(path, exist_ok=True)
             os.startfile(path)  # type: ignore[attr-defined]  (Windows)
-        except Exception:
+        except Exception:  # noqa: BLE001 - any failure is reported or handled here
             QMessageBox.information(self, "Log folder", path)
 
     # =====================================================================
@@ -1023,7 +1037,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         try:
             self._harvest_widgets().save()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - pre-existing best-effort cleanup, error ignored
             pass
         # Use a blocking call so the worker's stop() (and LJM handle close)
         # finishes on the worker thread before we quit it.  A queued emit

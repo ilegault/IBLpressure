@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass, asdict, field, fields
+from dataclasses import asdict, dataclass, field, fields
 
 
 def app_dir() -> str:
@@ -19,7 +19,8 @@ def app_dir() -> str:
     """
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # src/ibl/config.py -> src/ibl -> src -> project root
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 SETTINGS_PATH = os.path.join(app_dir(), "settings.json")
@@ -61,7 +62,7 @@ class Settings:
 
     # -----------------------------------------------------------------------
     @classmethod
-    def load(cls, path: str = SETTINGS_PATH) -> "Settings":
+    def load(cls, path: str = SETTINGS_PATH) -> Settings:
         s = cls()
         try:
             with open(path, "r", encoding="utf-8") as fh:

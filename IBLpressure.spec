@@ -21,7 +21,7 @@ def _vendor_datas():
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=['src'],
     binaries=[],
     datas=[('README.txt', '.')] + _vendor_datas(),
     hiddenimports=[
