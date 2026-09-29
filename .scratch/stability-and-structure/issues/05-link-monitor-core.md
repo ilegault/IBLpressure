@@ -7,7 +7,7 @@ window yet (ticket 06). Spec §2 *Link state*; CONTEXT.md *Link state*.
 
 **Blocked by:** 03
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
@@ -64,3 +64,5 @@ Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pyte
   ends at the next Sample. A read error outranks the Recovery text while it is current.
 - Local gate: `ruff check .`, `check_tests_first.py` and `pytest` (all but `test_window_smoke.py`, which
   needs the system Qt libraries this sandbox lacks) pass; CI runs that one.
+
+- 2026-09-29: Merged in PR #5, so Status is `done`.
