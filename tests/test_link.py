@@ -96,6 +96,8 @@ def test_recovers_to_live_after_gap():
     assert v.state is LinkState.LIVE
     stamp = datetime.fromtimestamp(10.2).strftime("%H:%M:%S")
     assert v.text == f"Live · Recovered at {stamp} after a 10 s gap"
+    for t in range(11, 21):  # samples keep arriving once a second
+        m.sample(float(t))
     assert m.view(10.2 + 10.1).text.startswith("Live · T7 #470012345 over USB · last sample")
 
 
@@ -127,6 +129,7 @@ def test_threshold_follows_sample_rate():
     m.configure(2, 1.0)
     assert m.late_threshold_s == 2.0
     m.configure(3, 0.2)
+    m.connect_requested(0)
     m.link_up(0, DESC)
     m.sample(0)
     assert m.view(12).state is LinkState.LIVE
