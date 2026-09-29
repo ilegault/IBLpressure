@@ -9,7 +9,7 @@ This ticket runs before CI exists (ticket 02), so its gate is local only.
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
