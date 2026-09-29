@@ -1,10 +1,16 @@
 """Headless Qt works: the main window builds in Simulation mode."""
+import pytest
+
 from ibl import config
 from ibl.config import Settings
 from ibl.mainwindow import MainWindow
 
 
-def _make_window(qtbot, tmp_path, monkeypatch):
+@pytest.fixture
+def window(qtbot, tmp_path, monkeypatch):
+    # A fixture, not a local variable: pytest keeps the window alive until qtbot closes it
+    # at teardown. A window garbage-collected earlier is destroyed with its worker thread
+    # still running, which aborts the process.
     path = str(tmp_path / "settings.json")
     monkeypatch.setattr(config, "SETTINGS_PATH", path)
     # Settings.save/load take SETTINGS_PATH as a default argument, bound when the
@@ -17,9 +23,7 @@ def _make_window(qtbot, tmp_path, monkeypatch):
     return window
 
 
-def test_window_opens_in_simulation(qtbot, tmp_path, monkeypatch):
-    window = _make_window(qtbot, tmp_path, monkeypatch)
-
+def test_window_opens_in_simulation(window):
     assert window.topbar.lbl_status.text() == "Not connected. Press Connect."
     assert "#999999" in window.topbar.lbl_link.styleSheet()
     # No explicit window.close(): qtbot.addWidget closes it at teardown. A second close
@@ -27,24 +31,18 @@ def test_window_opens_in_simulation(qtbot, tmp_path, monkeypatch):
     # first close already stopped.
 
 
-def test_window_and_worker_do_not_share_settings(qtbot, tmp_path, monkeypatch):
-    window = _make_window(qtbot, tmp_path, monkeypatch)
-
+def test_window_and_worker_do_not_share_settings(window):
     assert window.worker._settings is not window.settings
 
 
-def test_settings_change_reaches_worker_as_a_copy(qtbot, tmp_path, monkeypatch):
-    window = _make_window(qtbot, tmp_path, monkeypatch)
-
+def test_settings_change_reaches_worker_as_a_copy(window, qtbot):
     window.topbar.chk_sim.setChecked(not window.settings.simulate)
 
     qtbot.waitUntil(lambda: window.worker._settings.simulate == window.settings.simulate)
     assert window.worker._settings is not window.settings
 
 
-def test_spin_ranges_come_from_config(qtbot, tmp_path, monkeypatch):
-    window = _make_window(qtbot, tmp_path, monkeypatch)
-
+def test_spin_ranges_come_from_config(window):
     assert window.settings_panel.spn_hz.minimum() == config.MIN_SAMPLE_HZ
     assert window.settings_panel.spn_hz.maximum() == config.MAX_SAMPLE_HZ
     assert window.settings_panel.spn_hist.minimum() == config.MIN_HISTORY_S // 3600
@@ -53,8 +51,7 @@ def test_spin_ranges_come_from_config(qtbot, tmp_path, monkeypatch):
     assert window.settings_panel.spn_csv.maximum() == config.MAX_CSV_INTERVAL_S
 
 
-def test_save_failure_is_shown_in_status_line(qtbot, tmp_path, monkeypatch):
-    window = _make_window(qtbot, tmp_path, monkeypatch)
+def test_save_failure_is_shown_in_status_line(window, tmp_path, monkeypatch):
     blocker = tmp_path / "f.txt"
     blocker.write_text("a file")
     monkeypatch.setattr(Settings.save, "__defaults__", (str(blocker / "settings.json"),))

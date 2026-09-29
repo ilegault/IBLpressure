@@ -151,7 +151,14 @@ def test_caption_shown_only_for_long_spans(window, clock):
     assert window.plot_panel.lbl_plot_note.isHidden()
 
 
-def test_window_reloads_history_from_csv_at_startup(qtbot, tmp_path, monkeypatch):
+@pytest.fixture
+def csv_window(qtbot, tmp_path, monkeypatch):
+    """A window built over a minute-old Daily CSV rows.
+
+    A fixture, not a local variable: pytest holds the window until teardown, where
+    qtbot closes it and so stops its worker thread. A window that is garbage-collected
+    first is destroyed with the thread still running, which aborts the process.
+    """
     import time as _time
 
     from ibl.csvlogger import DailyCsvLogger
@@ -170,6 +177,11 @@ def test_window_reloads_history_from_csv_at_startup(qtbot, tmp_path, monkeypatch
     w = MainWindow(Settings(simulate=True, csv_enabled=True, csv_dir=str(logs),
                             sample_hz=1.0, history_s=3600))
     qtbot.addWidget(w)
+    return w, now
+
+
+def test_window_reloads_history_from_csv_at_startup(csv_window):
+    w, now = csv_window
     assert w.topbar.lbl_csv.text() == "History reloaded: 5 rows from CSV"
     t, _lo, _hi = w.history.window(0, now - 3600, now + 1)
     assert len(t) == 5
