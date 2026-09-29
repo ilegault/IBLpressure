@@ -8,7 +8,7 @@ ADR 0002; spec §2 *History and plot*.
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
