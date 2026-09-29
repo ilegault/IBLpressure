@@ -29,8 +29,8 @@ it takes effect immediately and is remembered in settings.json.
 """
 from __future__ import annotations
 
-import bisect
 import dataclasses
+import math
 import os
 import sys
 import time
@@ -75,6 +75,7 @@ from .config import (
 )
 from .csvlogger import DailyCsvLogger
 from .daq import DaqWorker
+from .history import RAW_SPAN_S, SUMMARY_BUCKET_S, History, minmax_decimate, redraw_interval_s
 from .link import DOT_COLORS, LinkMonitor, LinkState
 from .model import GaugeStatus, Sample
 from .theme import CHANNEL_COLORS, DARK_THEME, LIGHT_THEME, TIME_SPANS
@@ -108,33 +109,6 @@ class TorrAxis(pg.AxisItem):
 ROW_FAULT_BG = QColor(LIGHT_THEME["fault_bg"])
 ROW_RANGE_BG = QColor(LIGHT_THEME["range_bg"])
 ROW_APPROX_BG = QColor(LIGHT_THEME["approx_bg"])
-
-
-class Series:
-    """Rolling history for one channel. Plain lists, trimmed by age."""
-
-    def __init__(self) -> None:
-        self.t: list[float] = []
-        self.p: list[float] = []
-
-    def append(self, t: float, p: float) -> None:
-        self.t.append(t)
-        self.p.append(p)  # may be nan for a fault, which breaks the line
-
-    def trim(self, oldest_allowed: float) -> None:
-        if self.t and self.t[0] < oldest_allowed:
-            i = bisect.bisect_left(self.t, oldest_allowed)
-            if i:
-                del self.t[:i]
-                del self.p[:i]
-
-    def window(self, since: float) -> tuple[np.ndarray, np.ndarray]:
-        i = bisect.bisect_left(self.t, since)
-        return np.asarray(self.t[i:], dtype=float), np.asarray(self.p[i:], dtype=float)
-
-    def clear(self) -> None:
-        self.t.clear()
-        self.p.clear()
 
 
 class CompactSpin(QWidget):
@@ -255,7 +229,9 @@ class MainWindow(QMainWindow):
     def __init__(self, settings: Settings):
         super().__init__()
         self.settings = settings
-        self.series: dict[int, Series] = {c.ain: Series() for c in CHANNELS}
+        self.history = History(len(CHANNELS))
+        self._chan_index = {c.ain: i for i, c in enumerate(CHANNELS)}
+        self._last_redraw = -math.inf            # window clock of the last plot redraw
         self.curves: dict[int, pg.PlotDataItem] = {}
         self.logger = DailyCsvLogger(settings.csv_dir, settings.csv_include_voltages)
         self._last_csv = 0.0
@@ -493,12 +469,17 @@ class MainWindow(QMainWindow):
                                           brush=pg.mkBrush(*t["legend_brush"]),
                                           pen=pg.mkPen(t["legend_pen"]))
         self.legend.setVisible(self.settings.show_legend)
+        self.lbl_plot_note = QLabel(
+            f"Older than {RAW_SPAN_S // 3600} h: min/max per {SUMMARY_BUCKET_S} s")
+        self.lbl_plot_note.setToolTip(
+            "Only the most recent hour is kept sample by sample; older data is "
+            "summarised as the lowest and highest reading of each 10 s, so spikes still show.")
+        self.lbl_plot_note.setVisible(False)
+        lay.addWidget(self.lbl_plot_note)
         lay.addWidget(self.plot, 1)
 
         for ch in CHANNELS:
             curve = self.plot.plot([], [], pen=pg.mkPen("w"), connect="finite")
-            curve.setDownsampling(auto=True, method="peak")
-            curve.setClipToView(True)
             curve.setVisible(False)
             self.curves[ch.ain] = curve
 
@@ -1027,7 +1008,10 @@ class MainWindow(QMainWindow):
         self._update_table(sample)
         self._update_series(sample)
         self._maybe_write_csv(sample)
-        self._redraw_plot()
+        span = int(self.cmb_span.currentData() or 300)
+        if now - self._last_redraw >= redraw_interval_s(
+                span, self.plot.width(), self.settings.sample_hz):
+            self._redraw_plot()
         self._render_link()
 
     def _update_table(self, sample: Sample) -> None:
@@ -1061,15 +1045,11 @@ class MainWindow(QMainWindow):
         self._building = False
 
     def _update_series(self, sample: Sample) -> None:
-        # Never trim data that still falls within the visible plot window.
-        keep = max(self.settings.history_s, self.settings.plot_window_s)
-        oldest = sample.timestamp - keep
+        row = np.full(len(CHANNELS), np.nan)
         for r in sample.readings:
-            s = self.series[r.ain]
-            s.append(sample.timestamp,
-                     float("nan") if r.pressure is None or r.pressure <= 0
-                     else r.pressure)
-            s.trim(oldest)
+            if r.pressure is not None and r.pressure > 0:
+                row[self._chan_index[r.ain]] = r.pressure
+        self.history.append(sample.timestamp, row)
 
     def _maybe_write_csv(self, sample: Sample) -> None:
         if not self.settings.csv_enabled:
@@ -1099,23 +1079,28 @@ class MainWindow(QMainWindow):
 
     def _redraw_plot(self) -> None:
         span = int(self.cmb_span.currentData() or 300)
-        now = time.time()
+        now = self._now()
+        self._last_redraw = now
         since = now - span
+        self.lbl_plot_note.setVisible(span > RAW_SPAN_S)
+        n_buckets = max(100, self.plot.width())
+        gap_s = self.link.late_threshold_s
+        t1 = math.nextafter(now, math.inf)   # History.window excludes t1; keep a Sample at `now`
         any_data = False
         for ch in CHANNELS:
             curve = self.curves[ch.ain]
             if not curve.isVisible():
                 continue
-            t, p = self.series[ch.ain].window(since)
-            if t.size:
+            t, lo, hi = self.history.window(self._chan_index[ch.ain], since, t1)
+            t, p = minmax_decimate(t, lo, hi, since, now, n_buckets, gap_s)
+            if np.isfinite(p).any():
                 any_data = True
             curve.setData(t, p)
         if any_data:
             self.plot.setXRange(since, now, padding=0)
 
     def _clear_history(self) -> None:
-        for s in self.series.values():
-            s.clear()
+        self.history.clear()
         self._redraw_plot()
 
     # =====================================================================
