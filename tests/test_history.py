@@ -68,7 +68,7 @@ def test_channels_are_independent():
     h = History(2)
     for t in range(7200):
         h.append(float(t), np.array([1e-7, 9e-7 if t == 50 else 2e-7]))
-    _, lo0, hi0 = h.window(0, 0.0, 3600.0)
+    _, _lo0, hi0 = h.window(0, 0.0, 3600.0)
     _, lo1, hi1 = h.window(1, 0.0, 3600.0)
     assert hi0.max() == 1e-7
     assert hi1.max() == 9e-7 and lo1.min() == 2e-7
@@ -148,7 +148,7 @@ def test_decimate_uses_lo_and_hi_of_summary_points():
 def test_decimate_empty_bucket_is_a_break():
     t = np.array([0.5, 9.5])
     p = np.array([1.0, 2.0])
-    t_out, p_out = minmax_decimate(t, p, p, 0.0, 10.0, 10, gap_s=1e9)
+    _t_out, p_out = minmax_decimate(t, p, p, 0.0, 10.0, 10, gap_s=1e9)
     assert list(p_out[:1]) == [1.0]
     assert np.isnan(p_out[1:-1]).all() and len(p_out) == 10
     assert p_out[-1] == 2.0
