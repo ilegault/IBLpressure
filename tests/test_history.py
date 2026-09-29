@@ -160,7 +160,8 @@ def test_decimate_ignores_nan_points_and_empty_input():
     t_out, p_out = minmax_decimate(t, p, p, 0.0, 5.0, 2, gap_s=1e9)
     assert np.isnan(p_out).all()
     t_out, p_out = minmax_decimate(np.array([]), np.array([]), np.array([]), 0.0, 5.0, 2, 1e9)
-    assert len(t_out) == 0 and len(p_out) == 0
+    # no data at all: every bucket is empty, so the line is just breaks (one NaN each)
+    assert len(t_out) == 2 and np.isnan(p_out).all()
 
 
 def test_gap_becomes_a_break():
