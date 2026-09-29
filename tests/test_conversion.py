@@ -2,14 +2,9 @@
 import pytest
 
 from ibl.conversion import (
-    APPROX,
     CG_SEGMENTS,
     CG_TABLE,
-    FAULT,
-    NEGATIVE,
-    OK,
-    OVER,
-    UNDER,
+    GaugeStatus,
     _evaluate,
     convectron_pressure,
     convert,
@@ -44,19 +39,19 @@ def test_convectron_segments_are_continuous(i):
 
 
 @pytest.mark.parametrize("is_ion,volts,status,pressure,tol", [
-    (True, 7.0, OK, 1e-3, 0.01),
-    (True, 10.4, FAULT, None, None),
-    (True, 9.5, OVER, None, None),
-    (False, 1.1552, OK, 0.2, 0.02),
-    (False, 10.9, FAULT, None, None),
-    (False, 0.2, UNDER, None, None),
-    (False, 5.9, OVER, None, None),
-    (True, -0.1, NEGATIVE, None, None),
-    (False, -0.1, NEGATIVE, None, None),
+    (True, 7.0, GaugeStatus.OK, 1e-3, 0.01),
+    (True, 10.4, GaugeStatus.FAULT, None, None),
+    (True, 9.5, GaugeStatus.OVER, None, None),
+    (False, 1.1552, GaugeStatus.OK, 0.2, 0.02),
+    (False, 10.9, GaugeStatus.FAULT, None, None),
+    (False, 0.2, GaugeStatus.UNDER, None, None),
+    (False, 5.9, GaugeStatus.OVER, None, None),
+    (True, -0.1, GaugeStatus.NEGATIVE, None, None),
+    (False, -0.1, GaugeStatus.NEGATIVE, None, None),
 ])
 def test_convert_statuses(is_ion, volts, status, pressure, tol):
     r = convert(0, volts, is_ion, 10.0)
-    assert r.status == status
+    assert r.status is status
     if pressure is None:
         assert r.pressure is None
     else:
@@ -65,5 +60,5 @@ def test_convert_statuses(is_ion, volts, status, pressure, tol):
 
 def test_convert_use_ig_is_shown_approximate():
     r = convert(1, 0.3759, False, 10.0)
-    assert r.status == APPROX
+    assert r.status is GaugeStatus.APPROX
     assert r.display_text().startswith("~")

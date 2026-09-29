@@ -25,7 +25,8 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 
 from .channels import AIN_NAMES, CHANNELS
 from .config import Settings
-from .conversion import Reading, convert
+from .conversion import convert
+from .model import Sample
 
 # labjack-ljm is only needed for real hardware.  Import it lazily so the
 # program still starts (in Simulation mode) on a PC without the LJM driver.
@@ -37,18 +38,6 @@ except Exception as exc:  # pragma: no cover - depends on the machine  # noqa: B
     ljm = None  # type: ignore
     LJM_AVAILABLE = False
     LJM_IMPORT_ERROR = str(exc)
-
-
-class Sample:
-    """One sweep of all 14 channels."""
-    __slots__ = ("readings", "timestamp")
-
-    def __init__(self, timestamp: float, readings: list[Reading]):
-        self.timestamp = timestamp
-        self.readings = readings
-
-    def by_ain(self) -> dict[int, Reading]:
-        return {r.ain: r for r in self.readings}
 
 
 class _Simulator:

@@ -51,11 +51,11 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__, driver
-from .channels import CHANNELS
+from .channels import CHANNELS, PAIRS, pair_index
 from .config import Settings
-from .conversion import APPROX, FAULT, NEGATIVE, OVER, UNDER
 from .csvlogger import DailyCsvLogger
-from .daq import DaqWorker, Sample
+from .daq import DaqWorker
+from .model import GaugeStatus, Sample
 from .theme import CHANNEL_COLORS, DARK_THEME, LIGHT_THEME, TIME_SPANS
 
 # ---------------------------------------------------------------------------
@@ -64,7 +64,7 @@ pg.setConfigOptions(antialias=True)
 COL_IG_PLOT, COL_CG_PLOT, COL_LOC = 0, 1, 2
 COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS = 3, 4, 5
 COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS = 6, 7, 8
-NUM_PAIRS = len(CHANNELS) // 2
+NUM_PAIRS = len(PAIRS)
 
 
 class TorrAxis(pg.AxisItem):
@@ -350,8 +350,7 @@ class MainWindow(QMainWindow):
         mono_big_bold.setBold(True)
 
         for pair in range(NUM_PAIRS):
-            ig_ch = CHANNELS[pair * 2]
-            cg_ch = CHANNELS[pair * 2 + 1]
+            ig_ch, cg_ch = PAIRS[pair]
 
             ig_chk = QTableWidgetItem()
             ig_chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
@@ -657,8 +656,7 @@ class MainWindow(QMainWindow):
 
         wanted = set(s.plotted_ains)
         for pair in range(NUM_PAIRS):
-            ig_ain = pair * 2
-            cg_ain = pair * 2 + 1
+            ig_ain, cg_ain = (c.ain for c in PAIRS[pair])
             self.table.item(pair, COL_IG_PLOT).setCheckState(
                 Qt.Checked if ig_ain in wanted else Qt.Unchecked)
             self.table.item(pair, COL_CG_PLOT).setCheckState(
@@ -692,7 +690,7 @@ class MainWindow(QMainWindow):
         s.plotted_ains = [
             ain
             for pair in range(NUM_PAIRS)
-            for col, ain in ((COL_IG_PLOT, pair * 2), (COL_CG_PLOT, pair * 2 + 1))
+            for col, ain in ((COL_IG_PLOT, PAIRS[pair][0].ain), (COL_CG_PLOT, PAIRS[pair][1].ain))
             if self.table.item(pair, col).checkState() == Qt.Checked
         ]
         return s
@@ -714,7 +712,7 @@ class MainWindow(QMainWindow):
         if self._building or item.column() not in (COL_IG_PLOT, COL_CG_PLOT):
             return
         pair = item.row()
-        ain = pair * 2 + (0 if item.column() == COL_IG_PLOT else 1)
+        ain = PAIRS[pair][0 if item.column() == COL_IG_PLOT else 1].ain
         is_plotting = item.checkState() == Qt.Checked
         self.curves[ain].setVisible(is_plotting)
         self._rebuild_legend()
@@ -756,8 +754,7 @@ class MainWindow(QMainWindow):
     def _set_plotted(self, predicate) -> None:
         self._building = True
         for pair in range(NUM_PAIRS):
-            ig_ch = CHANNELS[pair * 2]
-            cg_ch = CHANNELS[pair * 2 + 1]
+            ig_ch, cg_ch = PAIRS[pair]
             ig_on = bool(predicate(ig_ch))
             cg_on = bool(predicate(cg_ch))
             self.table.item(pair, COL_IG_PLOT).setCheckState(
@@ -938,7 +935,7 @@ class MainWindow(QMainWindow):
             r = by_ain.get(ch.ain)
             if r is None:
                 continue
-            pair = ch.ain // 2
+            pair = pair_index(ch.ain)
             if ch.is_ion:
                 press_col, volts_col, status_col = COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS
             else:
@@ -947,13 +944,13 @@ class MainWindow(QMainWindow):
             self.table.item(pair, volts_col).setText(f"{r.voltage:8.4f}")
             # Always show pressure or fault status in the pressure column
             self.table.item(pair, press_col).setText(r.display_text())
-            self.table.item(pair, status_col).setText("" if r.ok else r.status)
+            self.table.item(pair, status_col).setText("" if r.ok else r.status.value)
 
-            if r.status in (FAULT, NEGATIVE):
+            if r.status in (GaugeStatus.FAULT, GaugeStatus.NEGATIVE):
                 bg = ROW_FAULT_BG
-            elif r.status in (UNDER, OVER):
+            elif r.status in (GaugeStatus.UNDER, GaugeStatus.OVER):
                 bg = ROW_RANGE_BG
-            elif r.status == APPROX:
+            elif r.status is GaugeStatus.APPROX:
                 bg = ROW_APPROX_BG
             else:
                 bg = QColor(Qt.transparent)

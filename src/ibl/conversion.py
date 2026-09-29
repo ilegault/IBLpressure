@@ -32,17 +32,9 @@ Convectron -- Analog Output 2, "CG1 NON-LIN"
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from .model import GaugeStatus, Reading
 
-# ---------------------------------------------------------------------------
-# Status codes attached to every reading
-# ---------------------------------------------------------------------------
-OK = "OK"
-FAULT = "Gauge Fault"
-UNDER = "Under range"
-OVER = "Over range"
-NEGATIVE = "Neg Voltage"
-APPROX = "Use IG"
+__all__ = ["GaugeStatus", "Reading", "convert"]
 
 # ---------------------------------------------------------------------------
 # Ion gauge
@@ -84,27 +76,6 @@ CG_TABLE: list[tuple[float, float]] = [
     (6.00e+2, 5.4194), (7.00e+2, 5.4949), (7.60e+2, 5.5340), (8.00e+2, 5.5581),
     (9.00e+2, 5.6141), (1.00e+3, 5.6593),
 ]
-
-
-@dataclass(frozen=True)
-class Reading:
-    """One channel at one instant."""
-    ain: int
-    voltage: float
-    pressure: float | None   # Torr, or None when it cannot be trusted
-    status: str              # OK / Gauge Fault / Under range / Over range
-
-    @property
-    def ok(self) -> bool:
-        return self.status == OK
-
-    def display_text(self) -> str:
-        """What goes in the table cell and in the CSV."""
-        if self.pressure is None:
-            return self.status
-        if self.status == APPROX:
-            return f"~{self.pressure:.2E}"
-        return f"{self.pressure:.2E}"
 
 
 def _horner(coeffs: tuple[float, ...], x: float) -> float:
@@ -162,28 +133,28 @@ def convert(ain: int, voltage: float, is_ion: bool, fault_volts: float) -> Readi
     # Negative voltage on a single-ended 0-10 V input is always a fault:
     # bad wiring, disconnected cable, or LJM error sentinel (-9999).
     if voltage < 0:
-        return Reading(ain, voltage, None, NEGATIVE)
+        return Reading(ain, voltage, None, GaugeStatus.NEGATIVE)
 
     if voltage > fault_volts:
-        return Reading(ain, voltage, None, FAULT)
+        return Reading(ain, voltage, None, GaugeStatus.FAULT)
 
     if is_ion:
         if voltage > IG_V_MAX:
-            return Reading(ain, voltage, None, OVER)
-        return Reading(ain, voltage, ion_gauge_pressure(voltage), OK)
+            return Reading(ain, voltage, None, GaugeStatus.OVER)
+        return Reading(ain, voltage, ion_gauge_pressure(voltage), GaugeStatus.OK)
 
     # --- Convectron ---
     if voltage < CG_V_MIN:
-        return Reading(ain, voltage, None, UNDER)
+        return Reading(ain, voltage, None, GaugeStatus.UNDER)
     if voltage > CG_V_MAX:
-        return Reading(ain, voltage, None, OVER)
+        return Reading(ain, voltage, None, GaugeStatus.OVER)
 
     p = convectron_pressure(voltage)
     if p <= 0.0:
-        return Reading(ain, voltage, None, UNDER)
+        return Reading(ain, voltage, None, GaugeStatus.UNDER)
     if voltage < CG_V_LOW_ACCURACY:
-        return Reading(ain, voltage, p, APPROX)
-    return Reading(ain, voltage, p, OK)
+        return Reading(ain, voltage, p, GaugeStatus.APPROX)
+    return Reading(ain, voltage, p, GaugeStatus.OK)
 
 
 # ---------------------------------------------------------------------------
