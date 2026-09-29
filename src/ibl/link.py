@@ -7,7 +7,7 @@ Gauge status never feeds it (rule 5). Every method takes `now` in seconds.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 
 
@@ -131,7 +131,9 @@ class LinkMonitor:
             return (LinkState.LIVE,
                     f"Live · {self._description} · read error: {self._read_error}")
         if self._recovered_at is not None and now - self._recovered_at < RECOVERY_NOTICE_S:
-            stamp = datetime.fromtimestamp(self._recovered_at).strftime("%H:%M:%S")
+            # The operator reads wall-clock time, so show it in local time.
+            local = datetime.fromtimestamp(self._recovered_at, tz=UTC).astimezone()
+            stamp = local.strftime("%H:%M:%S")
             return (LinkState.LIVE,
                     f"Live · Recovered at {stamp} after a {self._recovered_gap_s:.0f} s gap")
         return LinkState.LIVE, f"Live · {self._description} · last sample {age:.1f} s ago"

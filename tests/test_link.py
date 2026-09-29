@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pathlib
-from datetime import datetime
+from datetime import UTC, datetime
 
 from ibl.link import DOT_COLORS, RECOVERY_NOTICE_S, LinkMonitor, LinkState, LinkView
 
@@ -29,7 +29,7 @@ def test_api_constants():
 
 
 def test_link_module_imports_no_qt_or_time():
-    import ibl.link as link
+    from ibl import link
     src = pathlib.Path(link.__file__).read_text()
     for banned in ("import time", "from time", "PySide6", "pyqtgraph"):
         assert banned not in src
@@ -94,7 +94,7 @@ def test_recovers_to_live_after_gap():
     m.sample(10.2)
     v = m.view(10.5)
     assert v.state is LinkState.LIVE
-    stamp = datetime.fromtimestamp(10.2).strftime("%H:%M:%S")
+    stamp = datetime.fromtimestamp(10.2, tz=UTC).astimezone().strftime("%H:%M:%S")
     assert v.text == f"Live · Recovered at {stamp} after a 10 s gap"
     for t in range(11, 21):  # samples keep arriving once a second
         m.sample(float(t))
