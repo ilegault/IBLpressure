@@ -24,6 +24,7 @@ echo === Using %PY%
 
 echo.
 echo === Checking the pressure conversions against the VGC083A manual
+set "PYTHONPATH=%~dp0src"
 "%PY%" -m ibl.conversion                           || goto :fail
 
 echo.

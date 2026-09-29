@@ -22,7 +22,7 @@ must fail before the move; the conversion tests describe existing behaviour, so
 prove each one can fail by breaking `ion_gauge_pressure` / a `CG_SEGMENTS`
 coefficient locally, watching it go red, and restoring it.
 
-- [ ] **Move.** `git mv ibl src/ibl` (keep history). No `ibl/` folder remains at
+- [x] **Move.** `git mv ibl src/ibl` (keep history). No `ibl/` folder remains at
   the root. Delete the stale root `__pycache__/`. Add `pyproject.toml` with exactly:
   ```toml
   [build-system]
@@ -56,7 +56,7 @@ coefficient locally, watching it go red, and restoring it.
   ```
   Add `requirements-dev.txt` containing the single line `-e .[dev]` (the
   ticket-engine integrity workflow installs it). Keep `requirements.txt` unchanged.
-- [ ] **`app_dir()` still means the project root.** In `src/ibl/config.py`,
+- [x] **`app_dir()` still means the project root.** In `src/ibl/config.py`,
   `app_dir()` (not frozen) returns the folder three levels above `config.py`
   (the repo root). In `src/ibl/driver.py`, `_candidate_dirs()` calls
   `config.app_dir()` instead of repeating the logic. Test
@@ -65,7 +65,7 @@ coefficient locally, watching it go red, and restoring it.
   `config.SETTINGS_PATH` is `<repo root>/settings.json`;
   `test_driver_searches_repo_root_and_vendor` asserts the first two entries of
   `driver._candidate_dirs()` are `app_dir()` and `app_dir()/vendor`.
-- [ ] **`main.py` runs from source without an install.** Add
+- [x] **`main.py` runs from source without an install.** Add
   `def _ensure_src_on_path() -> None` to `main.py`: when not frozen, insert
   `<folder of main.py>/src` at `sys.path[0]` if absent; `main()` calls it before
   importing `ibl`. Test `test_main_puts_src_on_path` runs
@@ -73,14 +73,14 @@ coefficient locally, watching it go red, and restoring it.
   in a subprocess with `cwd` = repo root and `PYTHONPATH` removed from its env,
   and asserts the printed path ends with `src/ibl/__init__.py` (compare with
   `pathlib.Path(...).as_posix()`).
-- [ ] **Build files point at `src`.** `IBLpressure.spec`: `pathex=['src']`.
+- [x] **Build files point at `src`.** `IBLpressure.spec`: `pathex=['src']`.
   `build.bat`: before the conversion check add `set "PYTHONPATH=%~dp0src"` so
   `"%PY%" -m ibl.conversion` still runs. `README.md` *Code layout* shows `src/ibl/…`,
   adds `tests/`, `pyproject.toml`, and drops the `smoke_test.py` line.
   `tests/test_paths.py::test_build_files_point_at_src` asserts the spec text
   contains `pathex=['src']` and `build.bat` contains `PYTHONPATH=%~dp0src`.
   (The real exe build is verified on the bench in ticket 13.)
-- [ ] **Conversion tests.** `tests/test_conversion.py`, using only the public
+- [x] **Conversion tests.** `tests/test_conversion.py`, using only the public
   functions `ion_gauge_pressure`, `convectron_pressure`, `convert` and the tables
   in `conversion.py`:
   - `test_ion_gauge_matches_manual` — parametrized over the ten `(p, v)` pairs
@@ -98,9 +98,16 @@ coefficient locally, watching it go red, and restoring it.
 
   `python -m ibl.conversion` (with `src` on the path) still prints its report and
   exits 0.
-- [ ] **Gate.** `ruff check .` and `pytest -q` both pass locally; fix any existing
+- [x] **Gate.** `ruff check .` and `pytest -q` both pass locally; fix any existing
   ruff findings in the moved files without changing behaviour.
 
 Gates: `ruff check .`, `pytest -q` (CI arrives in ticket 02).
 
 ## Comments
+
+- Implemented; awaiting review and merge, so Status stays `in-progress` until it lands.
+- ruff 0.16 enables more default rules than 0.6 did. Safe ones were auto-fixed (import order, unused
+  imports, f-string prefixes, `int(round())`). Existing broad `except Exception` handlers, the open
+  CSV handle and the local-time file name carry a `# noqa` with a reason instead of a behaviour change.
+- The conversion tests were proven able to fail by breaking `ion_gauge_pressure` (11 red) and two
+  `CG_SEGMENTS` coefficients (22 red), then restoring.

@@ -17,6 +17,8 @@ import glob
 import os
 import sys
 
+from . import config
+
 
 # ---------------------------------------------------------------------------
 def check_ljm() -> tuple[bool, str]:
@@ -30,13 +32,13 @@ def check_ljm() -> tuple[bool, str]:
     """
     try:
         from labjack import ljm  # type: ignore
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - any failure is reported or handled here
         return False, f"LabJack LJM driver not found ({exc})"
 
     try:
         version = ljm.readLibraryConfigS("LJM_LIBRARY_VERSION")
         return True, f"LJM library {version:.4f} ready"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - any failure is reported or handled here
         return False, f"LJM present but not responding ({exc})"
 
 
@@ -46,10 +48,7 @@ def _candidate_dirs() -> list[str]:
     dirs: list[str] = []
 
     # The folder holding IBLpressure.exe (or the project root from source).
-    if getattr(sys, "frozen", False):
-        exe_dir = os.path.dirname(sys.executable)
-    else:
-        exe_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    exe_dir = config.app_dir()
     dirs += [exe_dir, os.path.join(exe_dir, "vendor")]
 
     # Where PyInstaller unpacks bundled data files (varies by version).
@@ -100,5 +99,5 @@ def launch_installer(path: str, silent: bool = False) -> bool:
             None, "runas", path, params, os.path.dirname(path), 1
         )
         return int(rc) > 32  # ShellExecute returns >32 on success
-    except Exception:
+    except Exception:  # noqa: BLE001 - any failure is reported or handled here
         return False

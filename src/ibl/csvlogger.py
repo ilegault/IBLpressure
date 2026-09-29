@@ -45,7 +45,7 @@ class DailyCsvLogger:
             os.makedirs(self.directory, exist_ok=True)
             path = os.path.join(self.directory, f"{when:%Y-%m-%d}.csv")
             is_new = not os.path.exists(path) or os.path.getsize(path) == 0
-            self._fh = open(path, "a", newline="", encoding="utf-8")
+            self._fh = open(path, "a", newline="", encoding="utf-8")  # noqa: SIM115 - held open for the day, closed in close()
             self._writer = csv.writer(self._fh)
             if is_new:
                 self._writer.writerow(self._header())
@@ -62,7 +62,7 @@ class DailyCsvLogger:
 
     # -- writing -------------------------------------------------------------
     def write(self, sample: Sample) -> bool:
-        when = _dt.datetime.fromtimestamp(sample.timestamp)
+        when = _dt.datetime.fromtimestamp(sample.timestamp)  # noqa: DTZ006 - file names use the PC's local calendar day
         if not self._ensure_file(when):
             return False
 

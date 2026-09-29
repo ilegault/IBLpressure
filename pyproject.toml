@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ibl-pressure"
+dynamic = ["version"]
+requires-python = ">=3.12"
+dependencies = ["PySide6>=6.8", "pyqtgraph>=0.13.7", "numpy>=1.26", "labjack-ljm>=1.23"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-qt>=4.4", "ruff>=0.6"]
+
+[tool.setuptools.dynamic]
+version = {attr = "ibl.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+qt_api = "pyside6"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["build", "dist", "vendor", ".scratch"]

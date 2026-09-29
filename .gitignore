@@ -7,3 +7,4 @@ settings.json
 data/
 *.spec.bak
 .idea
+*.egg-info/

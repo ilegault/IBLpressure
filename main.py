@@ -23,12 +23,22 @@ def _excepthook(exc_type, exc, tb) -> None:
         from PySide6.QtWidgets import QApplication, QMessageBox
         if QApplication.instance() is not None:
             QMessageBox.critical(None, "IBL Pressure - unexpected error", text)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - pre-existing best-effort cleanup, error ignored
         pass
+
+
+def _ensure_src_on_path() -> None:
+    """From source the package lives in src/; a frozen exe bundles it already."""
+    if getattr(sys, "frozen", False):
+        return
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
 
 
 def main() -> int:
     sys.excepthook = _excepthook
+    _ensure_src_on_path()
 
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
