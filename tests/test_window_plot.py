@@ -149,3 +149,27 @@ def test_caption_shown_only_for_long_spans(window, clock):
     assert RAW_SPAN_S == 3600
     _select_span(window, "5 minutes")
     assert window.lbl_plot_note.isHidden()
+
+
+def test_window_reloads_history_from_csv_at_startup(qtbot, tmp_path, monkeypatch):
+    import time as _time
+
+    from ibl.csvlogger import DailyCsvLogger
+
+    path = str(tmp_path / "settings.json")
+    monkeypatch.setattr(config, "SETTINGS_PATH", path)
+    monkeypatch.setattr(Settings.save, "__defaults__", (path,))
+    monkeypatch.setattr(Settings.load.__func__, "__defaults__", (path,))
+    now = _time.time()
+    logs = tmp_path / "logs"
+    logger = DailyCsvLogger(str(logs))
+    for i in range(5):
+        assert logger.write(_sample(now - 50 + i))
+    logger.close()
+
+    w = MainWindow(Settings(simulate=True, csv_enabled=True, csv_dir=str(logs),
+                            sample_hz=1.0, history_s=3600))
+    qtbot.addWidget(w)
+    assert w.lbl_csv.text() == "History reloaded: 5 rows from CSV"
+    t, _lo, _hi = w.history.window(0, now - 3600, now + 1)
+    assert len(t) == 5
