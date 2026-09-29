@@ -20,7 +20,8 @@ def _make_window(qtbot, tmp_path, monkeypatch):
 def test_window_opens_in_simulation(qtbot, tmp_path, monkeypatch):
     window = _make_window(qtbot, tmp_path, monkeypatch)
 
-    assert window.lbl_status.text() == "Not connected - press Connect"
+    assert window.lbl_status.text() == "Not connected. Press Connect."
+    assert "#999999" in window.lbl_link.styleSheet()
     # No explicit window.close(): qtbot.addWidget closes it at teardown. A second close
     # would hang, because closeEvent makes a blocking call into a worker thread that the
     # first close already stopped.
