@@ -26,109 +26,31 @@ import time
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtCore import QEvent, QMetaObject, Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+    QAbstractItemView, QCheckBox, QComboBox, QFileDialog,
     QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSpinBox,
+    QLineEdit, QMainWindow, QMessageBox, QPushButton, QSizePolicy,
     QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from . import __version__
 from .channels import CHANNELS
 from .config import Settings
-from .conversion import FAULT, OK, OVER, UNDER
+from .conversion import APPROX, FAULT, NEGATIVE, OK, OVER, UNDER
 from .csvlogger import DailyCsvLogger
 from .daq import DaqWorker, Sample, LJM_AVAILABLE
+from . import driver
+from .theme import LIGHT_THEME, DARK_THEME, CHANNEL_COLORS, TIME_SPANS
 
 # ---------------------------------------------------------------------------
 pg.setConfigOptions(antialias=True)
 
-# -- theme palettes --------------------------------------------------------
-LIGHT_THEME = {
-    "pg_bg": "w", "pg_fg": "k",
-    "legend_brush": (255, 255, 255, 240), "legend_pen": "#888888",
-    "fault_bg": "#ffd6d6", "range_bg": "#fff3cd", "stale_bg": "#f0f0f0",
-    "stylesheet": """
-        QMainWindow, QWidget { background-color: #f0f0f0; color: #1a1a1a; }
-        QGroupBox { border: 1px solid #bbb; border-radius: 4px;
-                    margin-top: 6px; padding-top: 10px; color: #1a1a1a;
-                    background-color: #f5f5f5; }
-        QGroupBox::title { subcontrol-origin: margin; left: 8px; }
-        QTableWidget { background-color: #ffffff; alternate-background-color: #f5f5f5;
-                       color: #1a1a1a; gridline-color: #d0d0d0; }
-        QHeaderView::section { background-color: #e8e8e8; color: #1a1a1a;
-                               border: 1px solid #ccc; padding: 3px; }
-        QPushButton { background-color: #e0e0e0; color: #1a1a1a;
-                      border: 1px solid #aaa; border-radius: 3px; padding: 4px 12px; }
-        QPushButton:hover { background-color: #d0d0d0; }
-        QPushButton:pressed { background-color: #c0c0c0; }
-        QComboBox { background-color: #ffffff; color: #1a1a1a; border: 1px solid #aaa; }
-        QComboBox QAbstractItemView { background-color: #ffffff; color: #1a1a1a; }
-        QLineEdit, QSpinBox, QDoubleSpinBox { background-color: #ffffff;
-                      color: #1a1a1a; border: 1px solid #aaa; }
-        QCheckBox { color: #1a1a1a; }
-        QCheckBox::indicator, QGroupBox::indicator { border: 2px solid #888;
-                               border-radius: 2px; width: 14px; height: 14px;
-                               background-color: #ffffff; }
-        QCheckBox::indicator:checked, QGroupBox::indicator:checked {
-                               background-color: #3078c6; border-color: #3078c6; }
-        QLabel { color: #1a1a1a; }
-        QSplitter::handle { background-color: #ccc; }
-    """,
-}
-DARK_THEME = {
-    "pg_bg": "#1e1e1e", "pg_fg": "#d4d4d4",
-    "legend_brush": (40, 40, 40, 240), "legend_pen": "#999999",
-    "fault_bg": "#6b2020", "range_bg": "#5c4a1a", "stale_bg": "#333333",
-    "stylesheet": """
-        QMainWindow, QWidget { background-color: #2b2b2b; color: #d4d4d4; }
-        QGroupBox { border: 1px solid #555; border-radius: 4px;
-                    margin-top: 6px; padding-top: 10px; color: #d4d4d4; }
-        QGroupBox::title { subcontrol-origin: margin; left: 8px; }
-        QTableWidget { background-color: #1e1e1e; alternate-background-color: #2a2a2a;
-                       color: #d4d4d4; gridline-color: #444; }
-        QHeaderView::section { background-color: #333; color: #d4d4d4;
-                               border: 1px solid #444; padding: 3px; }
-        QPushButton { background-color: #3c3c3c; color: #d4d4d4;
-                      border: 1px solid #555; border-radius: 3px; padding: 4px 12px; }
-        QPushButton:hover { background-color: #505050; }
-        QPushButton:pressed { background-color: #606060; }
-        QComboBox { background-color: #3c3c3c; color: #d4d4d4; border: 1px solid #555; }
-        QComboBox QAbstractItemView { background-color: #2b2b2b; color: #d4d4d4; }
-        QLineEdit, QSpinBox, QDoubleSpinBox { background-color: #3c3c3c;
-                      color: #d4d4d4; border: 1px solid #555; }
-        QCheckBox { color: #d4d4d4; }
-        QCheckBox::indicator, QGroupBox::indicator { border: 2px solid #888;
-                               border-radius: 2px; width: 14px; height: 14px;
-                               background-color: #3c3c3c; }
-        QCheckBox::indicator:checked, QGroupBox::indicator:checked {
-                               background-color: #4a9eff; border-color: #4a9eff; }
-        QLabel { color: #d4d4d4; }
-        QSplitter::handle { background-color: #444; }
-    """,
-}
-
-# One colour per AIN.  Ion gauges get the saturated colours, Convectrons the
-# lighter partner of the same hue, so a location's pair reads as a pair.
-CHANNEL_COLORS = [
-    "#1f77b4", "#8fbfe0",   # SNICS
-    "#d62728", "#f0a3a3",   # Injector
-    "#2ca02c", "#98d798",   # Post-accel
-    "#9467bd", "#c9b3de",   # Switching Magnet
-    "#ff7f0e", "#ffc38a",   # Left Chamber
-    "#17becf", "#96e2ea",   # Middle Chamber
-    "#8c564b", "#c4a09b",   # Right Chamber
-]
-
-TIME_SPANS = [
-    ("1 minute", 60), ("5 minutes", 300), ("15 minutes", 900),
-    ("30 minutes", 1800), ("1 hour", 3600), ("3 hours", 10800),
-    ("6 hours", 21600), ("12 hours", 43200), ("24 hours", 86400),
-]
-
-COL_PLOT, COL_LOC, COL_PRESS, COL_GAUGE, COL_AIN, COL_VOLTS, COL_STATUS = range(7)
+COL_IG_PLOT, COL_CG_PLOT, COL_LOC = 0, 1, 2
+COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS = 3, 4, 5
+COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS = 6, 7, 8
+NUM_PAIRS = len(CHANNELS) // 2
 
 
 class TorrAxis(pg.AxisItem):
@@ -146,6 +68,7 @@ class TorrAxis(pg.AxisItem):
 
 ROW_FAULT_BG = QColor(LIGHT_THEME["fault_bg"])
 ROW_RANGE_BG = QColor(LIGHT_THEME["range_bg"])
+ROW_APPROX_BG = QColor(LIGHT_THEME["approx_bg"])
 ROW_STALE_BG = QColor(LIGHT_THEME["stale_bg"])
 
 
@@ -176,8 +99,113 @@ class Series:
         self.p.clear()
 
 
+class CompactSpin(QWidget):
+    """Textbox flanked by − / + buttons for integer or float values.
+
+    Clicking the buttons steps the value.  The textbox is also directly
+    editable: focusing it strips the suffix so you can type a plain number,
+    then pressing Enter or clicking away commits and reformats the value.
+
+    Args:
+        min_val, max_val: inclusive range.
+        value: initial value.
+        step: how much each button press changes the value (default 1).
+        decimals: decimal places to display (0 → integer display).
+        suffix: unit text appended to the displayed value (e.g. " Hz", "%").
+    """
+    valueChanged = Signal(object)   # int when decimals=0, float otherwise
+
+    def __init__(self, min_val, max_val, value, *, step=1, decimals=0,
+                 suffix="", parent=None):
+        super().__init__(parent)
+        self._min = float(min_val)
+        self._max = float(max_val)
+        self._value = float(value)
+        self._step = float(step)
+        self._decimals = decimals
+        self._suffix = suffix
+
+        # Fixed-width only — height floats so the layout makes all three
+        # children (btn, textbox, btn) exactly the same height.
+        _btn_css = "QPushButton { padding: 2px; font-size: 15px; font-weight: bold; }"
+        btn_m = QPushButton("−")
+        btn_m.setFixedWidth(26)
+        btn_m.setStyleSheet(_btn_css)
+        btn_m.clicked.connect(self._decrement)
+
+        txt_w = max(35, len(self._format(self._max)) * 9 + 8)
+        self._txt = QLineEdit(self._format(self._value))
+        self._txt.setAlignment(Qt.AlignCenter)
+        self._txt.setFixedWidth(txt_w)
+        self._txt.installEventFilter(self)
+        self._txt.editingFinished.connect(self._on_edit)
+
+        btn_p = QPushButton("+")
+        btn_p.setFixedWidth(26)
+        btn_p.setStyleSheet(_btn_css)
+        btn_p.clicked.connect(self._increment)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        lay.addWidget(btn_m)
+        lay.addWidget(self._txt)
+        lay.addWidget(btn_p)
+
+    # Strip the suffix when the user focuses the textbox so they can type
+    # a plain number without fighting the unit text.
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._txt and event.type() == QEvent.Type.FocusIn:
+            QTimer.singleShot(0, self._prepare_for_edit)
+        return super().eventFilter(obj, event)
+
+    def _prepare_for_edit(self) -> None:
+        self._txt.setText(self._format_plain(self._value))
+        self._txt.selectAll()
+
+    def _on_edit(self) -> None:
+        text = self._txt.text().replace(self._suffix, "").strip()
+        try:
+            v = float(text)
+        except ValueError:
+            pass
+        else:
+            self.setValue(v)
+        # Always restore the formatted display (with suffix).
+        self._txt.setText(self._format(self._value))
+
+    def _format(self, v: float) -> str:
+        if self._decimals > 0:
+            return f"{v:.{self._decimals}f}{self._suffix}"
+        return f"{int(round(v))}{self._suffix}"
+
+    def _format_plain(self, v: float) -> str:
+        if self._decimals > 0:
+            return f"{v:.{self._decimals}f}"
+        return str(int(round(v)))
+
+    def value(self):
+        if self._decimals > 0:
+            return round(self._value, self._decimals)
+        return int(round(self._value))
+
+    def setValue(self, v) -> None:
+        v = max(self._min, min(self._max, float(v)))
+        if abs(v - self._value) > 1e-9:
+            self._value = v
+            self._txt.setText(self._format(v))
+            self.valueChanged.emit(self.value())
+
+    def _increment(self) -> None:
+        self.setValue(self._value + self._step)
+
+    def _decrement(self) -> None:
+        self.setValue(self._value - self._step)
+
+
 class MainWindow(QMainWindow):
     settings_changed = Signal(object)
+    start_worker = Signal()
     stop_worker = Signal()
 
     def __init__(self, settings: Settings):
@@ -190,6 +218,8 @@ class MainWindow(QMainWindow):
         self._last_sample_at = 0.0
         self._csv_rows = 0
         self._building = True
+        # True once the user has pressed Connect.  Nothing connects on its own.
+        self._link_wanted = False
 
         self.setWindowTitle(f"IBL Pressure  -  Beamline Vacuum Monitor  v{__version__}")
         self.resize(1500, 880)
@@ -236,7 +266,7 @@ class MainWindow(QMainWindow):
     def _build_topbar(self) -> QHBoxLayout:
         bar = QHBoxLayout()
 
-        self.btn_connect = QPushButton("Disconnect")
+        self.btn_connect = QPushButton("Connect")
         self.btn_connect.setFixedWidth(110)
         self.btn_connect.clicked.connect(self._toggle_connection)
         bar.addWidget(self.btn_connect)
@@ -256,9 +286,16 @@ class MainWindow(QMainWindow):
         self.lbl_link.setFixedWidth(16)
         bar.addWidget(self.lbl_link)
 
-        self.lbl_status = QLabel("Starting up...")
+        self.lbl_status = QLabel("Not connected - press Connect")
         self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(self.lbl_status, 1)
+
+        self.btn_install = QPushButton("Install driver")
+        self.btn_install.setToolTip("Install the LabJack LJM driver that "
+                                    "ships in this folder.")
+        self.btn_install.clicked.connect(self._install_driver)
+        self.btn_install.hide()
+        bar.addWidget(self.btn_install)
 
         self.lbl_csv = QLabel("CSV: off")
         bar.addWidget(self.lbl_csv)
@@ -280,10 +317,12 @@ class MainWindow(QMainWindow):
         header.setFont(f)
         lay.addWidget(header)
 
-        self.table = QTableWidget(len(CHANNELS), 7)
-        self.table.setHorizontalHeaderLabels(
-            ["Plot", "Location", "Pressure (Torr)", "Gauge", "AIN", "Volts", "Status"]
-        )
+        self.table = QTableWidget(NUM_PAIRS, 9)
+        self.table.setHorizontalHeaderLabels([
+            "IG", "CG", "Location",
+            "IG Pressure", "IG Volts", "IG Status",
+            "CG Pressure", "CG Volts", "CG Status",
+        ])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -296,38 +335,45 @@ class MainWindow(QMainWindow):
         mono_big_bold.setStyleHint(QFont.Monospace)
         mono_big_bold.setBold(True)
 
-        for row, ch in enumerate(CHANNELS):
-            chk = QTableWidgetItem()
-            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            chk.setCheckState(Qt.Unchecked)
-            chk.setBackground(QColor(CHANNEL_COLORS[ch.ain]))
-            self.table.setItem(row, COL_PLOT, chk)
+        for pair in range(NUM_PAIRS):
+            ig_ch = CHANNELS[pair * 2]
+            cg_ch = CHANNELS[pair * 2 + 1]
 
-            self.table.setItem(row, COL_LOC, QTableWidgetItem(ch.location))
-            self.table.setItem(row, COL_GAUGE,
-                               QTableWidgetItem("Ion" if ch.is_ion else "Convectron"))
-            ain_item = QTableWidgetItem(str(ch.ain))
-            ain_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, COL_AIN, ain_item)
+            ig_chk = QTableWidgetItem()
+            ig_chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            ig_chk.setCheckState(Qt.Unchecked)
+            ig_chk.setBackground(QColor(CHANNEL_COLORS[ig_ch.ain]))
+            self.table.setItem(pair, COL_IG_PLOT, ig_chk)
 
-            volts_item = QTableWidgetItem("---")
-            volts_item.setFont(mono)
-            volts_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.table.setItem(row, COL_VOLTS, volts_item)
+            cg_chk = QTableWidgetItem()
+            cg_chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            cg_chk.setCheckState(Qt.Unchecked)
+            cg_chk.setBackground(QColor(CHANNEL_COLORS[cg_ch.ain]))
+            self.table.setItem(pair, COL_CG_PLOT, cg_chk)
 
-            press_item = QTableWidgetItem("---")
-            press_item.setFont(mono_big_bold)
-            press_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.table.setItem(row, COL_PRESS, press_item)
+            self.table.setItem(pair, COL_LOC, QTableWidgetItem(ig_ch.location))
 
-            self.table.setItem(row, COL_STATUS, QTableWidgetItem(""))
+            for col in (COL_IG_VOLTS, COL_CG_VOLTS):
+                item = QTableWidgetItem("---")
+                item.setFont(mono)
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.table.setItem(pair, col, item)
+
+            for col in (COL_IG_PRESS, COL_CG_PRESS):
+                item = QTableWidgetItem("---")
+                item.setFont(mono_big_bold)
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.table.setItem(pair, col, item)
+
+            self.table.setItem(pair, COL_IG_STATUS, QTableWidgetItem(""))
+            self.table.setItem(pair, COL_CG_STATUS, QTableWidgetItem(""))
 
         hh = self.table.horizontalHeader()
-        hh.setSectionResizeMode(COL_PLOT, QHeaderView.Fixed)
-        self.table.setColumnWidth(COL_PLOT, 42)
-        hh.setSectionResizeMode(COL_LOC, QHeaderView.ResizeToContents)
-        hh.setSectionResizeMode(COL_PRESS, QHeaderView.ResizeToContents)
-        for col in (COL_GAUGE, COL_AIN, COL_VOLTS, COL_STATUS):
+        for col in (COL_IG_PLOT, COL_CG_PLOT):
+            hh.setSectionResizeMode(col, QHeaderView.Fixed)
+            self.table.setColumnWidth(col, 42)
+        for col in (COL_LOC, COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS,
+                    COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS):
             hh.setSectionResizeMode(col, QHeaderView.ResizeToContents)
         self.table.itemChanged.connect(self._on_table_item_changed)
         lay.addWidget(self.table, 1)
@@ -366,15 +412,11 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.chk_autoy)
 
         controls.addWidget(QLabel("Y from 1e"))
-        self.spn_ymin = QSpinBox()
-        self.spn_ymin.setRange(-12, 4)
-        self.spn_ymin.setValue(-9)
+        self.spn_ymin = CompactSpin(-12, 4, -9)
         self.spn_ymin.valueChanged.connect(self._apply_y_mode)
         controls.addWidget(self.spn_ymin)
         controls.addWidget(QLabel("to 1e"))
-        self.spn_ymax = QSpinBox()
-        self.spn_ymax.setRange(-11, 5)
-        self.spn_ymax.setValue(3)
+        self.spn_ymax = CompactSpin(-11, 5, 3)
         self.spn_ymax.valueChanged.connect(self._apply_y_mode)
         controls.addWidget(self.spn_ymax)
 
@@ -397,7 +439,6 @@ class MainWindow(QMainWindow):
         self.plot.getAxis("left").enableAutoSIPrefix(False)
         self.plot.getAxis("bottom").enableAutoSIPrefix(False)
         self.plot.setLogMode(x=False, y=True)
-        self.plot.showGrid(x=True, y=True, alpha=0.3)
         t = DARK_THEME if self.settings.dark_mode else LIGHT_THEME
         self.legend = self.plot.addLegend(offset=(8, 8), labelTextSize="8pt",
                                           brush=pg.mkBrush(*t["legend_brush"]),
@@ -406,13 +447,14 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.plot, 1)
 
         for ch in CHANNELS:
-            pen = pg.mkPen(CHANNEL_COLORS[ch.ain], width=1.6)
-            curve = self.plot.plot([], [], pen=pen, connect="finite")
+            curve = self.plot.plot([], [], pen=pg.mkPen("w"), connect="finite")
             curve.setDownsampling(auto=True, method="peak")
             curve.setClipToView(True)
             curve.setVisible(False)
             self.curves[ch.ain] = curve
 
+        self._apply_grid()
+        self._apply_curve_appearance()
         self._apply_y_mode()
         return panel
 
@@ -460,8 +502,7 @@ class MainWindow(QMainWindow):
         self.txt_ident.editingFinished.connect(self._on_widget_changed)
         f.addRow("Identifier:", self.txt_ident)
 
-        self.spn_res = QSpinBox()
-        self.spn_res.setRange(0, 12)
+        self.spn_res = CompactSpin(0, 12, 0)
         self.spn_res.setToolTip("T7 ADC resolution index. Higher = quieter but slower. "
                                 "0 uses the device default.")
         self.spn_res.valueChanged.connect(self._on_widget_changed)
@@ -469,19 +510,11 @@ class MainWindow(QMainWindow):
 
         # --- Acquisition ---
         f = add(1, "Acquisition")
-        self.spn_hz = QDoubleSpinBox()
-        self.spn_hz.setRange(0.1, 20.0)
-        self.spn_hz.setSingleStep(0.5)
-        self.spn_hz.setDecimals(2)
-        self.spn_hz.setSuffix("  Hz")
+        self.spn_hz = CompactSpin(0.1, 20.0, 2.0, step=0.5, decimals=2, suffix=" Hz")
         self.spn_hz.valueChanged.connect(self._on_widget_changed)
         f.addRow("Update rate:", self.spn_hz)
 
-        self.spn_fault = QDoubleSpinBox()
-        self.spn_fault.setRange(1.0, 12.0)
-        self.spn_fault.setSingleStep(0.1)
-        self.spn_fault.setDecimals(2)
-        self.spn_fault.setSuffix("  V")
+        self.spn_fault = CompactSpin(1.0, 12.0, 10.0, step=0.1, decimals=2, suffix=" V")
         self.spn_fault.setToolTip(
             "Above this the channel reads Gauge Fault.\n"
             "The VGC083A drives its output past +11 V on a fault, but a T7 "
@@ -492,9 +525,7 @@ class MainWindow(QMainWindow):
         self.spn_fault.valueChanged.connect(self._on_widget_changed)
         f.addRow("Gauge fault above:", self.spn_fault)
 
-        self.spn_hist = QSpinBox()
-        self.spn_hist.setRange(1, 48)
-        self.spn_hist.setSuffix("  hours")
+        self.spn_hist = CompactSpin(1, 48, 24, suffix=" hr")
         self.spn_hist.valueChanged.connect(self._on_widget_changed)
         f.addRow("Keep history:", self.spn_hist)
 
@@ -504,12 +535,7 @@ class MainWindow(QMainWindow):
         self.chk_csv.toggled.connect(self._on_widget_changed)
         f.addRow(self.chk_csv)
 
-        self.spn_csv = QDoubleSpinBox()
-        self.spn_csv.setRange(1.0, 3600.0)
-        self.spn_csv.setSingleStep(1.0)
-        self.spn_csv.setDecimals(1)
-        self.spn_csv.setSuffix("  s")
-        self.spn_csv.setMaximumWidth(130)
+        self.spn_csv = CompactSpin(1.0, 3600.0, 60.0, step=1.0, decimals=1, suffix=" s")
         self.spn_csv.valueChanged.connect(self._on_widget_changed)
         f.addRow("Write every:", self.spn_csv)
 
@@ -535,7 +561,48 @@ class MainWindow(QMainWindow):
         self.chk_legend.toggled.connect(self._on_widget_changed)
         f.addRow(self.chk_legend)
 
-        grid.setColumnStretch(3, 1)
+        self.spn_curve_width = CompactSpin(0.5, 10.0, 1.0, step=0.5, decimals=1, suffix=" px")
+        self.spn_curve_width.valueChanged.connect(self._on_widget_changed)
+        f.addRow("Line width:", self.spn_curve_width)
+
+        self.spn_curve_alpha = CompactSpin(0, 100, 80, suffix="%")
+        self.spn_curve_alpha.valueChanged.connect(self._on_widget_changed)
+        f.addRow("Line opacity:", self.spn_curve_alpha)
+
+        self.chk_show_grid = QCheckBox("Show background grid")
+        self.chk_show_grid.toggled.connect(self._on_widget_changed)
+        f.addRow(self.chk_show_grid)
+
+        self.spn_grid_alpha = CompactSpin(0, 100, 50, suffix="%")
+        self.spn_grid_alpha.valueChanged.connect(self._on_widget_changed)
+        f.addRow("Grid opacity:", self.spn_grid_alpha)
+
+        # --- Table appearance ---
+        f = add(4, "Table")
+        self.spn_table_font = CompactSpin(6, 72, 12, suffix=" pt")
+        self.spn_table_font.valueChanged.connect(self._on_widget_changed)
+        f.addRow("Pressure font:", self.spn_table_font)
+
+        self.spn_loc_font = CompactSpin(6, 72, 10, suffix=" pt")
+        self.spn_loc_font.valueChanged.connect(self._on_widget_changed)
+        f.addRow("Location font:", self.spn_loc_font)
+
+        self.col_chk: dict[int, QCheckBox] = {}
+        for col, name in (
+            (COL_LOC,       "Location"),
+            (COL_IG_PRESS,  "IG Pressure"),
+            (COL_IG_VOLTS,  "IG Volts"),
+            (COL_IG_STATUS, "IG Status"),
+            (COL_CG_PRESS,  "CG Pressure"),
+            (COL_CG_VOLTS,  "CG Volts"),
+            (COL_CG_STATUS, "CG Status"),
+        ):
+            chk = QCheckBox(name)
+            chk.toggled.connect(self._on_widget_changed)
+            f.addRow(chk)
+            self.col_chk[col] = chk
+
+        grid.setColumnStretch(5, 1)
         return box
 
     # =====================================================================
@@ -557,16 +624,33 @@ class MainWindow(QMainWindow):
         self.txt_csvdir.setText(s.csv_dir)
         self.chk_csvv.setChecked(s.csv_include_voltages)
         self.chk_legend.setChecked(s.show_legend)
+        self.spn_curve_width.setValue(s.curve_width)
+        self.spn_curve_alpha.setValue(s.curve_alpha)
+        self.chk_show_grid.setChecked(s.show_grid)
+        self.spn_grid_alpha.setValue(s.grid_alpha)
+        self.spn_table_font.setValue(s.table_font_size)
+        self.spn_loc_font.setValue(s.loc_font_size)
+        visible = set(s.table_visible_cols)
+        for col, chk in self.col_chk.items():
+            chk.setChecked(col in visible)
+        self._apply_table_appearance()
+        self._apply_curve_appearance()
+        self._apply_grid()
 
         idx = max(0, next((i for i, (_, sec) in enumerate(TIME_SPANS)
                            if sec >= s.plot_window_s), 1))
         self.cmb_span.setCurrentIndex(idx)
 
         wanted = set(s.plotted_ains)
-        for row, ch in enumerate(CHANNELS):
-            item = self.table.item(row, COL_PLOT)
-            item.setCheckState(Qt.Checked if ch.ain in wanted else Qt.Unchecked)
-            self.curves[ch.ain].setVisible(ch.ain in wanted)
+        for pair in range(NUM_PAIRS):
+            ig_ain = pair * 2
+            cg_ain = pair * 2 + 1
+            self.table.item(pair, COL_IG_PLOT).setCheckState(
+                Qt.Checked if ig_ain in wanted else Qt.Unchecked)
+            self.table.item(pair, COL_CG_PLOT).setCheckState(
+                Qt.Checked if cg_ain in wanted else Qt.Unchecked)
+            self.curves[ig_ain].setVisible(ig_ain in wanted)
+            self.curves[cg_ain].setVisible(cg_ain in wanted)
         self._rebuild_legend()
 
     def _harvest_widgets(self) -> Settings:
@@ -583,10 +667,19 @@ class MainWindow(QMainWindow):
         s.csv_dir = self.txt_csvdir.text().strip() or s.csv_dir
         s.csv_include_voltages = self.chk_csvv.isChecked()
         s.show_legend = self.chk_legend.isChecked()
+        s.curve_width = self.spn_curve_width.value()
+        s.curve_alpha = self.spn_curve_alpha.value()
+        s.show_grid = self.chk_show_grid.isChecked()
+        s.grid_alpha = self.spn_grid_alpha.value()
+        s.table_font_size = self.spn_table_font.value()
+        s.loc_font_size = self.spn_loc_font.value()
+        s.table_visible_cols = [col for col, chk in self.col_chk.items() if chk.isChecked()]
         s.plot_window_s = int(self.cmb_span.currentData())
         s.plotted_ains = [
-            ch.ain for row, ch in enumerate(CHANNELS)
-            if self.table.item(row, COL_PLOT).checkState() == Qt.Checked
+            ain
+            for pair in range(NUM_PAIRS)
+            for col, ain in ((COL_IG_PLOT, pair * 2), (COL_CG_PLOT, pair * 2 + 1))
+            if self.table.item(pair, col).checkState() == Qt.Checked
         ]
         return s
 
@@ -597,14 +690,19 @@ class MainWindow(QMainWindow):
         s.save()
         self.logger.reconfigure(s.csv_dir, s.csv_include_voltages)
         self.legend.setVisible(s.show_legend)
+        self._apply_table_appearance()
+        self._apply_curve_appearance()
+        self._apply_grid()
         self.settings_changed.emit(s)
         self._redraw_plot()
 
     def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
-        if self._building or item.column() != COL_PLOT:
+        if self._building or item.column() not in (COL_IG_PLOT, COL_CG_PLOT):
             return
-        ch = CHANNELS[item.row()]
-        self.curves[ch.ain].setVisible(item.checkState() == Qt.Checked)
+        pair = item.row()
+        ain = pair * 2 + (0 if item.column() == COL_IG_PLOT else 1)
+        is_plotting = item.checkState() == Qt.Checked
+        self.curves[ain].setVisible(is_plotting)
         self._rebuild_legend()
         self._on_widget_changed()
 
@@ -616,10 +714,11 @@ class MainWindow(QMainWindow):
         self._apply_theme()
 
     def _apply_theme(self) -> None:
-        global ROW_FAULT_BG, ROW_RANGE_BG, ROW_STALE_BG
+        global ROW_FAULT_BG, ROW_RANGE_BG, ROW_APPROX_BG, ROW_STALE_BG
         theme = DARK_THEME if self.settings.dark_mode else LIGHT_THEME
         ROW_FAULT_BG = QColor(theme["fault_bg"])
         ROW_RANGE_BG = QColor(theme["range_bg"])
+        ROW_APPROX_BG = QColor(theme["approx_bg"])
         ROW_STALE_BG = QColor(theme["stale_bg"])
 
         from PySide6.QtWidgets import QApplication
@@ -642,14 +741,57 @@ class MainWindow(QMainWindow):
 
     def _set_plotted(self, predicate) -> None:
         self._building = True
-        for row, ch in enumerate(CHANNELS):
-            on = bool(predicate(ch))
-            self.table.item(row, COL_PLOT).setCheckState(
-                Qt.Checked if on else Qt.Unchecked)
-            self.curves[ch.ain].setVisible(on)
+        for pair in range(NUM_PAIRS):
+            ig_ch = CHANNELS[pair * 2]
+            cg_ch = CHANNELS[pair * 2 + 1]
+            ig_on = bool(predicate(ig_ch))
+            cg_on = bool(predicate(cg_ch))
+            self.table.item(pair, COL_IG_PLOT).setCheckState(
+                Qt.Checked if ig_on else Qt.Unchecked)
+            self.table.item(pair, COL_CG_PLOT).setCheckState(
+                Qt.Checked if cg_on else Qt.Unchecked)
+            self.curves[ig_ch.ain].setVisible(ig_on)
+            self.curves[cg_ch.ain].setVisible(cg_on)
         self._building = False
         self._rebuild_legend()
         self._on_widget_changed()
+
+    def _apply_curve_appearance(self) -> None:
+        alpha = int(self.settings.curve_alpha / 100 * 255)
+        width = self.settings.curve_width
+        for ch in CHANNELS:
+            color = pg.mkColor(CHANNEL_COLORS[ch.ain])
+            pen = pg.mkPen((color.red(), color.green(), color.blue(), alpha), width=width)
+            self.curves[ch.ain].setPen(pen)
+
+    def _apply_grid(self) -> None:
+        alpha = self.settings.grid_alpha / 100
+        self.plot.showGrid(x=self.settings.show_grid, y=self.settings.show_grid, alpha=alpha)
+
+    def _apply_table_appearance(self) -> None:
+        size = self.settings.table_font_size
+        font = QFont("Consolas", size)
+        font.setStyleHint(QFont.Monospace)
+        font.setBold(True)
+        loc_font = QFont("Consolas", self.settings.loc_font_size)
+        loc_font.setStyleHint(QFont.Monospace)
+        for pair in range(NUM_PAIRS):
+            for col in (COL_IG_PRESS, COL_CG_PRESS):
+                item = self.table.item(pair, col)
+                if item:
+                    item.setFont(font)
+            item = self.table.item(pair, COL_LOC)
+            if item:
+                item.setFont(loc_font)
+        row_h = max(22, int(size * 2.4))
+        self.table.verticalHeader().setDefaultSectionSize(row_h)
+        chk_w = max(22, row_h)
+        for col in (COL_IG_PLOT, COL_CG_PLOT):
+            self.table.setColumnWidth(col, chk_w)
+        visible = set(self.settings.table_visible_cols)
+        for col in (COL_LOC, COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS,
+                    COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS):
+            self.table.setColumnHidden(col, col not in visible)
 
     def _browse_csv_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Choose the CSV log folder",
@@ -667,6 +809,56 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Log folder", path)
 
     # =====================================================================
+    # LabJack driver: check on startup, offer a one-click install
+    # =====================================================================
+    def _refresh_driver_state(self) -> None:
+        """Tell the user plainly if the LJM driver is missing, and show the
+        Install button when we shipped an installer.  Simulation mode never
+        needs the driver, so we stay quiet there."""
+        if self.settings.simulate:
+            self.btn_install.hide()
+            return
+
+        ok, msg = driver.check_ljm()
+        if ok:
+            self.btn_install.hide()
+            return
+
+        if driver.find_installer():
+            self.btn_install.show()
+            self._on_status(msg + " - click 'Install driver', or tick "
+                            "Simulation mode.")
+        else:
+            self.btn_install.hide()
+            self._on_status(msg + " - install the LJM software from "
+                            "labjack.com, or tick Simulation mode.")
+
+    def _install_driver(self) -> None:
+        path = driver.find_installer()
+        if not path:
+            QMessageBox.information(
+                self, "Install driver",
+                "No LabJack installer was bundled with this program.\n\n"
+                "Download and run the LJM software installer from labjack.com.")
+            return
+
+        if QMessageBox.question(
+                self, "Install LabJack driver",
+                "This will launch the LabJack LJM installer.\n\n"
+                "Windows will ask for administrator permission.  When it "
+                "finishes, close and reopen IBL Pressure so it can find the "
+                "driver.\n\nContinue?") != QMessageBox.Yes:
+            return
+
+        if driver.launch_installer(path):
+            self._on_status("LabJack installer launched - finish it, then "
+                            "restart IBL Pressure.")
+        else:
+            QMessageBox.warning(
+                self, "Install driver",
+                "Could not launch the installer:\n" + path)
+
+    # =====================================================================
     # Acquisition thread
     # =====================================================================
     def _start_worker(self) -> None:
@@ -674,7 +866,9 @@ class MainWindow(QMainWindow):
         self.worker = DaqWorker(self.settings)
         self.worker.moveToThread(self.thread)
 
-        self.thread.started.connect(self.worker.start)
+        # Deliberately NOT connected to thread.started: the acquisition
+        # thread just idles until the user presses Connect.
+        self.start_worker.connect(self.worker.start)
         self.worker.sample.connect(self._on_sample)
         self.worker.status.connect(self._on_status)
         self.worker.connection_changed.connect(self._on_connection_changed)
@@ -683,19 +877,21 @@ class MainWindow(QMainWindow):
 
         self.thread.start()
 
-        if not LJM_AVAILABLE and not self.settings.simulate:
-            self._on_status("LabJack LJM driver not found - tick Simulation mode, "
-                            "or install the LJM software from labjack.com")
+        self._refresh_driver_state()
 
     def _toggle_connection(self) -> None:
-        if self.btn_connect.text() == "Disconnect":
+        if self._link_wanted:
+            self._link_wanted = False
             self.stop_worker.emit()
             self.btn_connect.setText("Connect")
             self._on_status("Disconnected")
         else:
-            self.settings_changed.emit(self.settings)
-            QTimer.singleShot(0, self.worker.start)
+            self._link_wanted = True
             self.btn_connect.setText("Disconnect")
+            self._on_status("Connecting...")
+            # The worker already has the current settings (every widget
+            # change is pushed to it live), so just tell it to open.
+            self.start_worker.emit()
 
     def _on_status(self, text: str) -> None:
         self.lbl_status.setText(text)
@@ -704,7 +900,12 @@ class MainWindow(QMainWindow):
         self.lbl_link.setStyleSheet(
             f"color: {'#2ca02c' if up else '#d62728'}; font-size: 18px;")
         self.lbl_link.setText("\u25cf")
-        self.btn_connect.setText("Disconnect" if up else "Connect")
+        self.btn_connect.setText("Disconnect" if self._link_wanted else "Connect")
+        # If the link is down because the LJM driver is missing, let the
+        # driver check own the status line (and show the Install button)
+        # so its actionable message wins over the worker's generic one.
+        if not up and not self.settings.simulate:
+            self._refresh_driver_state()
 
     # =====================================================================
     # New data
@@ -719,26 +920,37 @@ class MainWindow(QMainWindow):
     def _update_table(self, sample: Sample) -> None:
         self._building = True
         by_ain = sample.by_ain()
-        for row, ch in enumerate(CHANNELS):
+        for ch in CHANNELS:
             r = by_ain.get(ch.ain)
             if r is None:
                 continue
-            self.table.item(row, COL_VOLTS).setText(f"{r.voltage:8.4f}")
-            self.table.item(row, COL_PRESS).setText(r.display_text())
-            self.table.item(row, COL_STATUS).setText("" if r.ok else r.status)
+            pair = ch.ain // 2
+            if ch.is_ion:
+                press_col, volts_col, status_col = COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS
+            else:
+                press_col, volts_col, status_col = COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS
 
-            if r.status == FAULT:
+            self.table.item(pair, volts_col).setText(f"{r.voltage:8.4f}")
+            # Always show pressure or fault status in the pressure column
+            self.table.item(pair, press_col).setText(r.display_text())
+            self.table.item(pair, status_col).setText("" if r.ok else r.status)
+
+            if r.status in (FAULT, NEGATIVE):
                 bg = ROW_FAULT_BG
             elif r.status in (UNDER, OVER):
                 bg = ROW_RANGE_BG
+            elif r.status == APPROX:
+                bg = ROW_APPROX_BG
             else:
                 bg = QColor(Qt.transparent)
-            for col in (COL_LOC, COL_GAUGE, COL_AIN, COL_VOLTS, COL_PRESS, COL_STATUS):
-                self.table.item(row, col).setBackground(bg)
+            for col in (press_col, volts_col, status_col):
+                self.table.item(pair, col).setBackground(bg)
         self._building = False
 
     def _update_series(self, sample: Sample) -> None:
-        oldest = sample.timestamp - self.settings.history_s
+        # Never trim data that still falls within the visible plot window.
+        keep = max(self.settings.history_s, self.settings.plot_window_s)
+        oldest = sample.timestamp - keep
         for r in sample.readings:
             s = self.series[r.ain]
             s.append(sample.timestamp,
@@ -796,6 +1008,16 @@ class MainWindow(QMainWindow):
     def _check_stale(self) -> None:
         if self._last_sample_at and time.time() - self._last_sample_at > 5:
             self.lbl_link.setStyleSheet("color: #d62728; font-size: 18px;")
+            # Mark every pressure cell as stale so the operator sees the
+            # readings are no longer live.
+            self._building = True
+            for pair in range(NUM_PAIRS):
+                for press_col in (COL_IG_PRESS, COL_CG_PRESS):
+                    item = self.table.item(pair, press_col)
+                    if item and item.text() != "STALE":
+                        item.setText("STALE")
+                        item.setBackground(ROW_STALE_BG)
+            self._building = False
 
     # =====================================================================
     def closeEvent(self, event) -> None:
@@ -803,8 +1025,14 @@ class MainWindow(QMainWindow):
             self._harvest_widgets().save()
         except Exception:
             pass
-        self.stop_worker.emit()
+        # Use a blocking call so the worker's stop() (and LJM handle close)
+        # finishes on the worker thread before we quit it.  A queued emit
+        # would race with thread.quit() and could leave the device open.
+        QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
         self.thread.quit()
-        self.thread.wait(3000)
+        self.thread.wait(5000)
+        # Final safety net: close every LJM handle in the process so the
+        # next launch starts with a clean slate (no phantom handles).
+        self.worker.cleanup()
         self.logger.close()
         super().closeEvent(event)

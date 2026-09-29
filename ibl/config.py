@@ -46,10 +46,17 @@ class Settings:
     # --- Appearance ---------------------------------------------------------
     dark_mode: bool = False          # False = light (default), True = dark
     show_legend: bool = False        # plot legend hidden by default
+    table_font_size: int = 12        # pressure cell font size (pt)
+    loc_font_size: int = 10          # location cell font size (pt)
+    table_visible_cols: list = field(default_factory=lambda: list(range(2, 9)))
+    curve_alpha: int = 31            # plot line opacity 0-100 %
+    curve_width: float = 1.0         # plot line width, pixels
+    show_grid: bool = True           # show background grid lines on plot
+    grid_alpha: int = 30             # grid line opacity 0-100 %
 
     # --- Plot ---------------------------------------------------------------
     plot_window_s: int = 300         # visible time span, default 5 minutes
-    history_s: int = 6 * 3600        # how much data is kept in memory
+    history_s: int = 24 * 3600       # how much data is kept in memory
     plotted_ains: list[int] = field(default_factory=lambda: [0, 2, 4, 6, 8, 10, 12])
 
     # -----------------------------------------------------------------------

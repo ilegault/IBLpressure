@@ -41,6 +41,8 @@ OK = "OK"
 FAULT = "Gauge Fault"
 UNDER = "Under range"
 OVER = "Over range"
+NEGATIVE = "Neg Voltage"
+APPROX = "Use IG"
 
 # ---------------------------------------------------------------------------
 # Ion gauge
@@ -60,13 +62,16 @@ CG_SEGMENTS: list[tuple[float, float, str, tuple[float, ...]]] = [
     # v_low, v_high, kind,  (a, b, c, d, e, f)
     (0.375, 2.842, "poly", (-0.02585, 0.03767, 0.04563, 0.1151, -0.04158, 0.008738)),
     (2.842, 4.945, "rat5", (0.1031, -0.3986, -0.02322, 0.07438, 0.07229, -0.006866)),
-    (4.940, 5.659, "rat3", (100.624, -0.37679, -20.5623, 0.0348656)),
+    (4.940, 5.66, "rat3", (100.624, -0.37679, -20.5623, 0.0348656)),
 ]
 
-CG_V_MIN = 0.375          # 0.3751 V is "less than 1e-4 Torr"
-CG_V_MAX = 5.659          # 1000 Torr
-CG_P_MIN = 1.0e-4         # what we report when the gauge is pinned at the bottom
-CG_P_MAX = 1000.0
+CG_V_MIN = 0.375          # CG minimum
+CG_V_MAX = 5.66           # 1000 Torr (manual says 5.6593 V at 1000 Torr)
+# Below this voltage the S-curve is nearly flat: the span from 0 to ~5 mTorr
+# is only ~45 mV, so ADC noise dominates and the polynomial fit error exceeds
+# 2%.  Readings below here are flagged "Use IG" to tell the operator to read
+# the ion gauge instead.
+CG_V_LOW_ACCURACY = 0.376  # ~1 mTorr; below here the CG cannot resolve pressure
 
 # Reference points from the manual's pressure/voltage table, used by self_test().
 CG_TABLE: list[tuple[float, float]] = [
@@ -97,10 +102,8 @@ class Reading:
         """What goes in the table cell and in the CSV."""
         if self.pressure is None:
             return self.status
-        if self.status == UNDER:
-            return f"< {self.pressure:.2E}"
-        if self.status == OVER:
-            return f"> {self.pressure:.2E}"
+        if self.status == APPROX:
+            return f"~{self.pressure:.2E}"
         return f"{self.pressure:.2E}"
 
 
@@ -135,11 +138,15 @@ def ion_gauge_pressure(v: float) -> float:
 
 
 def convectron_pressure(v: float) -> float:
-    """VGC083A Analog Output 2, 'CG1 NON-LIN'. Volts in, Torr out."""
+    """VGC083A Analog Output 2, 'CG1 NON-LIN'. Volts in, Torr out.
+
+    Only valid for voltages within the S-curve range (CG_V_MIN to CG_V_MAX).
+    Raises ValueError if the voltage is outside all segment bounds.
+    """
     for v_low, v_high, kind, coeffs in CG_SEGMENTS:
         if v <= v_high:
             return _evaluate(kind, coeffs, v)
-    return _evaluate(CG_SEGMENTS[-1][2], CG_SEGMENTS[-1][3], v)
+    raise ValueError(f"voltage {v} V is above the last CG segment ({CG_SEGMENTS[-1][1]} V)")
 
 
 def convert(ain: int, voltage: float, is_ion: bool, fault_volts: float) -> Reading:
@@ -152,25 +159,30 @@ def convert(ain: int, voltage: float, is_ion: bool, fault_volts: float) -> Readi
     gauge type ever legitimately outputs that much (IG tops out at 9 V,
     the Convectron at 5.659 V).
     """
+    # Negative voltage on a single-ended 0-10 V input is always a fault:
+    # bad wiring, disconnected cable, or LJM error sentinel (-9999).
+    if voltage < 0:
+        return Reading(ain, voltage, None, NEGATIVE)
+
     if voltage > fault_volts:
         return Reading(ain, voltage, None, FAULT)
 
     if is_ion:
-        p = ion_gauge_pressure(voltage)
         if voltage > IG_V_MAX:
-            # Between 9 V and the fault threshold the IG is off its stated span.
-            return Reading(ain, voltage, p, OVER)
-        return Reading(ain, voltage, p, OK)
+            return Reading(ain, voltage, None, OVER)
+        return Reading(ain, voltage, ion_gauge_pressure(voltage), OK)
 
     # --- Convectron ---
     if voltage < CG_V_MIN:
-        return Reading(ain, voltage, CG_P_MIN, UNDER)
+        return Reading(ain, voltage, None, UNDER)
     if voltage > CG_V_MAX:
-        return Reading(ain, voltage, CG_P_MAX, OVER)
+        return Reading(ain, voltage, None, OVER)
 
     p = convectron_pressure(voltage)
     if p <= 0.0:
-        return Reading(ain, voltage, CG_P_MIN, UNDER)
+        return Reading(ain, voltage, None, UNDER)
+    if voltage < CG_V_LOW_ACCURACY:
+        return Reading(ain, voltage, p, APPROX)
     return Reading(ain, voltage, p, OK)
 
 

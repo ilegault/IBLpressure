@@ -1,9 +1,15 @@
 """
-The data acquisition side.
+The data acquisition side — command-response mode (NOT stream).
 
 DaqWorker lives on its own QThread so a slow or unhappy LabJack can never
-freeze the window.  It ticks on a QTimer, reads AIN0..AIN13 in one call,
-converts the volts to Torr, and emits the batch.
+freeze the window.  It ticks on a QTimer, reads AIN0..AIN13 in one
+ljm.eReadNames() call (command-response), converts the volts to Torr,
+and emits the batch.
+
+Command-response is more reliable than stream mode for this application:
+each tick sends one request and waits for one reply, so there are no
+streaming buffers to overflow and the device link recovers naturally from
+brief USB or Ethernet glitches.
 
 Flow:
     MainWindow  --start()-->  QThread  -->  DaqWorker._tick()
@@ -87,20 +93,32 @@ class DaqWorker(QObject):
         self._sim: _Simulator | None = None
         self._timer: QTimer | None = None
         self._fail_count = 0
+        self._reconnect_at: float = 0.0   # timestamp of last _open() attempt
+        self._running = False             # True only between start() and stop()
 
     # -- lifecycle ----------------------------------------------------------
     @Slot()
     def start(self) -> None:
-        """Called once the thread is running."""
-        self._timer = QTimer()
-        self._timer.setTimerType(Qt.PreciseTimer)
-        self._timer.timeout.connect(self._tick)
+        """Open the device and begin sampling.
+
+        Nothing calls this at startup - only the Connect button does.  It is
+        safe to call twice: the sampling timer is created once and reused, so
+        repeated Connect presses can never stack up timers.
+        """
+        if self._running:
+            return
+        self._running = True
+        if self._timer is None:
+            self._timer = QTimer()
+            self._timer.setTimerType(Qt.PreciseTimer)
+            self._timer.timeout.connect(self._tick)
         self._open()
         self._apply_interval()
         self._timer.start()
 
     @Slot()
     def stop(self) -> None:
+        self._running = False
         if self._timer is not None:
             self._timer.stop()
         self._close()
@@ -116,7 +134,7 @@ class DaqWorker(QObject):
         )
         self._settings = settings
         self._apply_interval()
-        if relink:
+        if relink and self._running:
             self._close()
             self._open()
 
@@ -129,6 +147,7 @@ class DaqWorker(QObject):
     # -- device -------------------------------------------------------------
     def _open(self) -> None:
         self._fail_count = 0
+        self._reconnect_at = time.time()  # throttle future auto-reconnect attempts
 
         if self._settings.simulate:
             self._sim = _Simulator()
@@ -175,9 +194,34 @@ class DaqWorker(QObject):
                 ljm.close(self._handle)
             except Exception:
                 pass
-        self._handle = None
+            finally:
+                self._handle = None
         self._sim = None
         self.connection_changed.emit(False)
+
+    def cleanup(self) -> None:
+        """Final teardown — call once at application exit.
+
+        Closes this worker's handle *and* calls ljm.closeAll() so the LJM
+        library releases every device handle in the process.  This prevents
+        the "phantom open handle" problem where a stale handle from a
+        previous session makes the next launch fail to connect.
+        """
+        if self._timer is not None:
+            self._timer.stop()
+        self._running = False
+        if self._handle is not None and LJM_AVAILABLE:
+            try:
+                ljm.close(self._handle)
+            except Exception:
+                pass
+            self._handle = None
+        if LJM_AVAILABLE:
+            try:
+                ljm.closeAll()
+            except Exception:
+                pass
+        self._sim = None
 
     # -- the loop -----------------------------------------------------------
     @Slot()
@@ -193,13 +237,23 @@ class DaqWorker(QObject):
             except Exception as exc:
                 self._fail_count += 1
                 self.status.emit(f"Read error ({self._fail_count}): {exc}")
-                if self._fail_count >= 5:
+                if self._fail_count >= 3:
                     self.status.emit("Lost the T7 - trying to reconnect...")
                     self._close()
+                    # Brief pause before reopening so the OS can release the
+                    # USB/Ethernet handle cleanly.
+                    time.sleep(0.5)
                     self._open()
                 return
         else:
-            return  # not connected; nothing to do this tick
+            # Not connected.  If the LJM driver is present and we are not in
+            # simulation mode, retry the connection every 5 seconds so a
+            # USB glitch or a briefly-missing T7 recovers automatically.
+            if self._running and LJM_AVAILABLE and not self._settings.simulate:
+                if now - self._reconnect_at >= 5.0:
+                    self.status.emit("No T7 connection - retrying...")
+                    self._open()
+            return
 
         fault_v = float(self._settings.fault_volts)
         readings = [

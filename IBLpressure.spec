@@ -11,11 +11,19 @@ control PC and run IBLpressure.exe inside it.
 
 block_cipher = None
 
+import glob as _glob
+import os as _os
+
+def _vendor_datas():
+    """Bundle any LabJack installer dropped in vendor\\ so the app can
+    offer a one-click driver install.  Empty vendor\\ => nothing added."""
+    return [(exe, 'vendor') for exe in _glob.glob(_os.path.join('vendor', '*.exe'))]
+
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('README.txt', '.')] + _vendor_datas(),
     hiddenimports=[
         'pyqtgraph.graphicsItems.DateAxisItem',
         'labjack',
