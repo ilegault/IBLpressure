@@ -14,6 +14,16 @@ Layout:
     | v Settings  (collapsible: link, rates, fault level, CSV, ...) |
     +--------------------------------------------------------------+
 
+Link state (the dot and the status line):
+
+    DaqWorker --link_up/link_down/reconnecting/read_error--> MainWindow
+    MainWindow --forwards each, with the clock--> LinkMonitor (ibl.link)
+    every 500 ms and after every event: _render_link() asks LinkMonitor.view(now)
+    and draws the dot colour and the status text from that one LinkView.
+
+A number is only shown in a pressure cell while the Link is Live; otherwise the
+cell shows STALE and the last value moves to the Status column with its age.
+
 Everything on the settings row defaults to what Design.pdf asks for; changing
 it takes effect immediately and is remembered in settings.json.
 """
@@ -65,6 +75,7 @@ from .config import (
 )
 from .csvlogger import DailyCsvLogger
 from .daq import DaqWorker
+from .link import DOT_COLORS, LinkMonitor, LinkState
 from .model import GaugeStatus, Sample
 from .theme import CHANNEL_COLORS, DARK_THEME, LIGHT_THEME, TIME_SPANS
 
@@ -75,6 +86,10 @@ COL_IG_PLOT, COL_CG_PLOT, COL_LOC = 0, 1, 2
 COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS = 3, 4, 5
 COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS = 6, 7, 8
 NUM_PAIRS = len(PAIRS)
+
+
+def _dot_style(color: str) -> str:
+    return f"color: {color}; font-size: 18px;"
 
 
 class TorrAxis(pg.AxisItem):
@@ -93,7 +108,6 @@ class TorrAxis(pg.AxisItem):
 ROW_FAULT_BG = QColor(LIGHT_THEME["fault_bg"])
 ROW_RANGE_BG = QColor(LIGHT_THEME["range_bg"])
 ROW_APPROX_BG = QColor(LIGHT_THEME["approx_bg"])
-ROW_STALE_BG = QColor(LIGHT_THEME["stale_bg"])
 
 
 class Series:
@@ -245,7 +259,12 @@ class MainWindow(QMainWindow):
         self.curves: dict[int, pg.PlotDataItem] = {}
         self.logger = DailyCsvLogger(settings.csv_dir, settings.csv_include_voltages)
         self._last_csv = 0.0
-        self._last_sample_at = 0.0
+        self._now = time.time                   # the clock; tests replace it
+        self.link = LinkMonitor(settings.late_after_samples, settings.sample_hz)
+        self._last_sample: Sample | None = None  # newest Sample, for the STALE display
+        self._last_sample_now = 0.0              # window clock when it arrived
+        self._driver_msg = ""                    # LJM-missing text, shown only while DOWN
+        self._settings_problem = ""              # last settings save failure, until one succeeds
         self._csv_rows = 0
         self._building = True
         # True once the user has pressed Connect.  Nothing connects on its own.
@@ -260,10 +279,11 @@ class MainWindow(QMainWindow):
 
         self._start_worker()
 
-        # Greys out the table if samples stop arriving.
-        self._watchdog = QTimer(self)
-        self._watchdog.timeout.connect(self._check_stale)
-        self._watchdog.start(2000)
+        # Ages the status line and the STALE table even when no event arrives.
+        self._link_timer = QTimer(self)
+        self._link_timer.timeout.connect(self._render_link)
+        self._link_timer.start(500)
+        self._render_link()
 
     # =====================================================================
     # UI construction
@@ -312,11 +332,11 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.chk_dark)
 
         self.lbl_link = QLabel("\u25cf")
-        self.lbl_link.setStyleSheet("color: #999; font-size: 18px;")
+        self.lbl_link.setStyleSheet(_dot_style(DOT_COLORS[LinkState.IDLE]))
         self.lbl_link.setFixedWidth(16)
         bar.addWidget(self.lbl_link)
 
-        self.lbl_status = QLabel("Not connected - press Connect")
+        self.lbl_status = QLabel("")
         self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(self.lbl_status, 1)
 
@@ -715,10 +735,11 @@ class MainWindow(QMainWindow):
         if self._building:
             return
         s = self._harvest_widgets()
-        problem = s.save()
-        if problem:
-            self.lbl_status.setText(problem)
-            print(problem, file=sys.stderr)
+        self._settings_problem = s.save()
+        if self._settings_problem:
+            print(self._settings_problem, file=sys.stderr)
+        self.link.configure(s.late_after_samples, s.sample_hz)
+        self._render_link()
         self.logger.reconfigure(s.csv_dir, s.csv_include_voltages)
         self.legend.setVisible(s.show_legend)
         self._apply_table_appearance()
@@ -741,19 +762,18 @@ class MainWindow(QMainWindow):
         if self._building:
             return
         self.settings.dark_mode = checked
-        problem = self.settings.save()
-        if problem:
-            self.lbl_status.setText(problem)
-            print(problem, file=sys.stderr)
+        self._settings_problem = self.settings.save()
+        if self._settings_problem:
+            print(self._settings_problem, file=sys.stderr)
         self._apply_theme()
+        self._render_link()
 
     def _apply_theme(self) -> None:
-        global ROW_FAULT_BG, ROW_RANGE_BG, ROW_APPROX_BG, ROW_STALE_BG
+        global ROW_FAULT_BG, ROW_RANGE_BG, ROW_APPROX_BG
         theme = DARK_THEME if self.settings.dark_mode else LIGHT_THEME
         ROW_FAULT_BG = QColor(theme["fault_bg"])
         ROW_RANGE_BG = QColor(theme["range_bg"])
         ROW_APPROX_BG = QColor(theme["approx_bg"])
-        ROW_STALE_BG = QColor(theme["stale_bg"])
 
         from PySide6.QtWidgets import QApplication
         QApplication.instance().setStyleSheet(theme["stylesheet"])
@@ -848,6 +868,7 @@ class MainWindow(QMainWindow):
         """Tell the user plainly if the LJM driver is missing, and show the
         Install button when we shipped an installer.  Simulation mode never
         needs the driver, so we stay quiet there."""
+        self._driver_msg = ""
         if self.settings.simulate:
             self.btn_install.hide()
             return
@@ -859,12 +880,12 @@ class MainWindow(QMainWindow):
 
         if driver.find_installer():
             self.btn_install.show()
-            self._on_status(msg + " - click 'Install driver', or tick "
-                            "Simulation mode.")
+            self._driver_msg = (msg + " - click 'Install driver', or tick "
+                                "Simulation mode.")
         else:
             self.btn_install.hide()
-            self._on_status(msg + " - install the LJM software from "
-                            "labjack.com, or tick Simulation mode.")
+            self._driver_msg = (msg + " - install the LJM software from "
+                                "labjack.com, or tick Simulation mode.")
 
     def _install_driver(self) -> None:
         path = driver.find_installer()
@@ -884,8 +905,9 @@ class MainWindow(QMainWindow):
             return
 
         if driver.launch_installer(path):
-            self._on_status("LabJack installer launched - finish it, then "
-                            "restart IBL Pressure.")
+            self._driver_msg = ("LabJack installer launched - finish it, then "
+                                "restart IBL Pressure.")
+            self._render_link()
         else:
             QMessageBox.warning(
                 self, "Install driver",
@@ -903,8 +925,10 @@ class MainWindow(QMainWindow):
         # thread just idles until the user presses Connect.
         self.start_worker.connect(self.worker.start)
         self.worker.sample.connect(self._on_sample)
-        self.worker.status.connect(self._on_status)
-        self.worker.connection_changed.connect(self._on_connection_changed)
+        self.worker.link_up.connect(self._on_link_up)
+        self.worker.link_down.connect(self._on_link_down)
+        self.worker.reconnecting.connect(self._on_reconnecting)
+        self.worker.read_error.connect(self._on_read_error)
         self.settings_changed.connect(self.worker.update_settings)
         self.stop_worker.connect(self.worker.stop)
 
@@ -913,42 +937,98 @@ class MainWindow(QMainWindow):
         self._refresh_driver_state()
 
     def _toggle_connection(self) -> None:
+        now = self._now()
         if self._link_wanted:
             self._link_wanted = False
+            self.link.disconnect_requested(now)
             self.stop_worker.emit()
             self.btn_connect.setText("Connect")
-            self._on_status("Disconnected")
         else:
             self._link_wanted = True
+            self.link.connect_requested(now)
             self.btn_connect.setText("Disconnect")
-            self._on_status("Connecting...")
             # The worker already has the current settings (every widget
             # change is pushed to it live), so just tell it to open.
             self.start_worker.emit()
+        self._render_link()
 
-    def _on_status(self, text: str) -> None:
-        self.lbl_status.setText(text)
+    # -- Link events: forwarded to LinkMonitor, then one redraw ---------------
+    def _on_link_up(self, description: str) -> None:
+        self.link.link_up(self._now(), description)
+        self._render_link()
 
-    def _on_connection_changed(self, up: bool) -> None:
-        self.lbl_link.setStyleSheet(
-            f"color: {'#2ca02c' if up else '#d62728'}; font-size: 18px;")
-        self.lbl_link.setText("\u25cf")
-        self.btn_connect.setText("Disconnect" if self._link_wanted else "Connect")
-        # If the link is down because the LJM driver is missing, let the
-        # driver check own the status line (and show the Install button)
-        # so its actionable message wins over the worker's generic one.
-        if not up and not self.settings.simulate:
+    def _on_link_down(self, reason: str) -> None:
+        self.link.link_down(self._now(), reason)
+        # If the link is down because the LJM driver is missing, the driver
+        # check owns the status line (and shows the Install button).
+        if not self.settings.simulate:
             self._refresh_driver_state()
+        self._render_link()
+
+    def _on_reconnecting(self, attempt: int) -> None:
+        self.link.reconnecting(self._now(), attempt)
+        self._render_link()
+
+    def _on_read_error(self, message: str) -> None:
+        self.link.read_error(self._now(), message)
+        self._render_link()
+
+    def _render_link(self) -> None:
+        """The one place the dot and the status line are drawn (AGENTS.md rule 3).
+
+        Also keeps the table honest: a number is shown only while the Link is Live.
+        """
+        now = self._now()
+        view = self.link.view(now)
+        self.lbl_link.setStyleSheet(_dot_style(view.dot_color))
+        self.lbl_link.setText("\u25cf")
+        text = view.text
+        if view.state is LinkState.DOWN and self._driver_msg:
+            text = self._driver_msg
+        if self._settings_problem:
+            text = f"{self._settings_problem} \u00b7 {text}"
+        self.lbl_status.setText(text)
+        if view.state is not LinkState.LIVE:
+            self._show_stale(now)
+
+    def _show_stale(self, now: float) -> None:
+        """Replace every pressure number with STALE; the last value and its age
+        go in that gauge's Status cell."""
+        sample = self._last_sample
+        if sample is None:
+            return
+        age = max(0.0, now - self._last_sample_now)
+        stale_bg = QColor((DARK_THEME if self.settings.dark_mode else LIGHT_THEME)["stale_bg"])
+        by_ain = sample.by_ain()
+        self._building = True
+        for ch in CHANNELS:
+            r = by_ain.get(ch.ain)
+            if r is None:
+                continue
+            pair = pair_index(ch.ain)
+            if ch.is_ion:
+                press_col, volts_col, status_col = COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS
+            else:
+                press_col, volts_col, status_col = COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS
+            self.table.item(pair, press_col).setText("STALE")
+            self.table.item(pair, status_col).setText(f"last {r.display_text()}, {age:.0f} s ago")
+            for col in (press_col, volts_col, status_col):
+                self.table.item(pair, col).setBackground(stale_bg)
+        self._building = False
 
     # =====================================================================
     # New data
     # =====================================================================
     def _on_sample(self, sample: Sample) -> None:
-        self._last_sample_at = time.time()
+        now = self._now()
+        self.link.sample(now)
+        self._last_sample = sample
+        self._last_sample_now = now
         self._update_table(sample)
         self._update_series(sample)
         self._maybe_write_csv(sample)
         self._redraw_plot()
+        self._render_link()
 
     def _update_table(self, sample: Sample) -> None:
         self._building = True
@@ -1037,20 +1117,6 @@ class MainWindow(QMainWindow):
         for s in self.series.values():
             s.clear()
         self._redraw_plot()
-
-    def _check_stale(self) -> None:
-        if self._last_sample_at and time.time() - self._last_sample_at > 5:
-            self.lbl_link.setStyleSheet("color: #d62728; font-size: 18px;")
-            # Mark every pressure cell as stale so the operator sees the
-            # readings are no longer live.
-            self._building = True
-            for pair in range(NUM_PAIRS):
-                for press_col in (COL_IG_PRESS, COL_CG_PRESS):
-                    item = self.table.item(pair, press_col)
-                    if item and item.text() != "STALE":
-                        item.setText("STALE")
-                        item.setBackground(ROW_STALE_BG)
-            self._building = False
 
     # =====================================================================
     def closeEvent(self, event) -> None:

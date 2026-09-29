@@ -14,6 +14,13 @@ brief USB or Ethernet glitches.
 Flow:
     MainWindow  --start()-->  QThread  -->  DaqWorker._tick()
     DaqWorker   --sample-->   MainWindow (table, plot, CSV)
+    DaqWorker   --link_up / link_down / reconnecting / read_error-->  MainWindow
+                --> LinkMonitor, the one place that turns these events (and the
+                    clock) into the status dot and the status line.
+
+The worker only *reports* what happened, as structured events; it never words
+the status line itself.  It never shares a mutable object with the window: it
+gets a copy of Settings each time they change.
 """
 from __future__ import annotations
 
@@ -72,8 +79,10 @@ class DaqWorker(QObject):
     """Runs inside the acquisition QThread."""
 
     sample = Signal(object)        # Sample
-    status = Signal(str)           # human readable status line
-    connection_changed = Signal(bool)
+    link_up = Signal(str)          # "T7 #<serial> over <connection>" or "Simulation mode"
+    link_down = Signal(str)        # reason the device could not be opened
+    reconnecting = Signal(int)     # attempt number, sent before each reopen after a loss
+    read_error = Signal(str)       # one failed read; the link may still recover
 
     def __init__(self, settings: Settings):
         super().__init__()
@@ -82,6 +91,7 @@ class DaqWorker(QObject):
         self._sim: _Simulator | None = None
         self._timer: QTimer | None = None
         self._fail_count = 0
+        self._attempt = 0                 # reconnect attempts since the link was last up
         self._reconnect_at: float = 0.0   # timestamp of last _open() attempt
         self._running = False             # True only between start() and stop()
 
@@ -97,6 +107,7 @@ class DaqWorker(QObject):
         if self._running:
             return
         self._running = True
+        self._attempt = 0
         if self._timer is None:
             self._timer = QTimer()
             self._timer.setTimerType(Qt.PreciseTimer)
@@ -141,17 +152,13 @@ class DaqWorker(QObject):
         if self._settings.simulate:
             self._sim = _Simulator()
             self._handle = None
-            self.status.emit("Simulation mode - no hardware in use")
-            self.connection_changed.emit(True)
+            self._attempt = 0
+            self.link_up.emit("Simulation mode")
             return
 
         self._sim = None
         if not LJM_AVAILABLE:
-            self.status.emit(
-                "LabJack LJM library not found. Install the LJM software from "
-                "labjack.com, or tick Simulation mode. (" + LJM_IMPORT_ERROR + ")"
-            )
-            self.connection_changed.emit(False)
+            self.link_down.emit(f"LabJack LJM library not found ({LJM_IMPORT_ERROR})")
             return
 
         try:
@@ -168,14 +175,11 @@ class DaqWorker(QObject):
                 ["AIN_ALL_NEGATIVE_CH", "AIN_ALL_RANGE", "AIN_ALL_RESOLUTION_INDEX"],
                 [199, 10.0, float(self._settings.resolution_index)],
             )
-            self.status.emit(
-                f"Connected to T7 serial {serial} over {self._settings.connection}"
-            )
-            self.connection_changed.emit(True)
+            self._attempt = 0
+            self.link_up.emit(f"T7 #{serial} over {self._settings.connection}")
         except Exception as exc:  # noqa: BLE001 - any failure is reported or handled here
             self._handle = None
-            self.status.emit(f"Could not open LabJack T7: {exc}")
-            self.connection_changed.emit(False)
+            self.link_down.emit(str(exc))
 
     def _close(self) -> None:
         if self._handle is not None and LJM_AVAILABLE:
@@ -186,7 +190,6 @@ class DaqWorker(QObject):
             finally:
                 self._handle = None
         self._sim = None
-        self.connection_changed.emit(False)
 
     def cleanup(self) -> None:
         """Final teardown — call once at application exit.
@@ -225,9 +228,10 @@ class DaqWorker(QObject):
                 self._fail_count = 0
             except Exception as exc:  # noqa: BLE001 - any failure is reported or handled here
                 self._fail_count += 1
-                self.status.emit(f"Read error ({self._fail_count}): {exc}")
+                self.read_error.emit(str(exc))
                 if self._fail_count >= 3:
-                    self.status.emit("Lost the T7 - trying to reconnect...")
+                    self._attempt += 1
+                    self.reconnecting.emit(self._attempt)
                     self._close()
                     # Brief pause before reopening so the OS can release the
                     # USB/Ethernet handle cleanly.
@@ -240,7 +244,8 @@ class DaqWorker(QObject):
             # USB glitch or a briefly-missing T7 recovers automatically.
             if (self._running and LJM_AVAILABLE and not self._settings.simulate
                     and now - self._reconnect_at >= 5.0):
-                self.status.emit("No T7 connection - retrying...")
+                self._attempt += 1
+                self.reconnecting.emit(self._attempt)
                 self._open()
             return
 
