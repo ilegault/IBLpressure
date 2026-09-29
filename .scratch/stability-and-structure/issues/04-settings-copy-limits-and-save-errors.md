@@ -7,7 +7,7 @@ save failures instead of swallowing them. Spec §1.4, §2 *Settings*.
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Runner:** any
 
@@ -15,7 +15,7 @@ save failures instead of swallowing them. Spec §1.4, §2 *Settings*.
 
 ## Acceptance criteria
 
-- [ ] **Limits.** `config.py` defines `MIN_SAMPLE_HZ = 0.1`, `MAX_SAMPLE_HZ = 10.0`,
+- [x] **Limits.** `config.py` defines `MIN_SAMPLE_HZ = 0.1`, `MAX_SAMPLE_HZ = 10.0`,
   `MIN_HISTORY_S = 3600`, `MAX_HISTORY_S = 24 * 3600`, `MIN_LATE_AFTER_SAMPLES = 2`,
   `MAX_LATE_AFTER_SAMPLES = 20`, `MIN_CSV_INTERVAL_S = 1.0`,
   `MAX_CSV_INTERVAL_S = 3600.0`, and a field `late_after_samples: int = 3`. Add
@@ -26,13 +26,13 @@ save failures instead of swallowing them. Spec §1.4, §2 *Settings*.
   `csv_interval_s: 0.2` and asserts the loaded values are 10.0, 86400, 2, 1.0.
   `test_load_keeps_defaults_for_missing_keys` asserts `late_after_samples == 3`
   when the key is absent.
-- [ ] **Widgets read their ranges from `config.py`.** In `mainwindow.py`,
+- [x] **Widgets read their ranges from `config.py`.** In `mainwindow.py`,
   `spn_hz` uses `MIN_SAMPLE_HZ`/`MAX_SAMPLE_HZ`, `spn_hist` uses
   `MIN_HISTORY_S // 3600`/`MAX_HISTORY_S // 3600`, `spn_csv` uses the CSV limits;
   each spin's constructor default equals the `Settings()` default (1.0 Hz, 24 hr,
   10.0 s; curve opacity 31 %, grid opacity 30 %). `DaqWorker._apply_interval`
   clamps with the config constants instead of `0.05` / `20.0`.
-- [ ] **The worker never holds the window's object.** `MainWindow` passes
+- [x] **The worker never holds the window's object.** `MainWindow` passes
   `dataclasses.replace(self.settings)` to `DaqWorker(...)` and emits
   `settings_changed` with `dataclasses.replace(s)`. Tests in
   `tests/test_window_smoke.py` (window built as in `test_window_opens_in_simulation`):
@@ -44,7 +44,7 @@ save failures instead of swallowing them. Spec §1.4, §2 *Settings*.
   and asserts `window.worker._settings is not window.settings`. (On the old code the
   two are the same object, so the first test fails there — that is the bug that made
   `DaqWorker.update_settings`'s `relink` always false.)
-- [ ] **Save errors are reported.** `Settings.save` returns `""` on success and
+- [x] **Save errors are reported.** `Settings.save` returns `""` on success and
   `"Settings not saved: <reason>"` on `OSError`. `MainWindow._on_widget_changed`
   shows a non-empty result in `lbl_csv`'s neighbour status (`lbl_status`) and in the
   log. Test `test_save_reports_unwritable_path` saves to a path inside a file
@@ -52,7 +52,7 @@ save failures instead of swallowing them. Spec §1.4, §2 *Settings*.
   return starts with `Settings not saved:`. Replace `closeEvent`'s bare
   `except Exception: pass` around saving with the same reporting (print to stderr is
   acceptable there since the window is closing).
-- [ ] Full gate green.
+- [x] Full gate green.
 
 Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pytest -q`.
 

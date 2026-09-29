@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 
 
 def app_dir() -> str:
@@ -25,6 +25,16 @@ def app_dir() -> str:
 
 SETTINGS_PATH = os.path.join(app_dir(), "settings.json")
 
+# --- Limits: every widget range and every clamp reads these, never a literal ---
+MIN_SAMPLE_HZ = 0.1
+MAX_SAMPLE_HZ = 10.0
+MIN_HISTORY_S = 3600
+MAX_HISTORY_S = 24 * 3600
+MIN_LATE_AFTER_SAMPLES = 2
+MAX_LATE_AFTER_SAMPLES = 20
+MIN_CSV_INTERVAL_S = 1.0
+MAX_CSV_INTERVAL_S = 3600.0
+
 
 @dataclass
 class Settings:
@@ -37,6 +47,7 @@ class Settings:
     sample_hz: float = 1.0           # how often the table and plot update
     resolution_index: int = 8        # T7 ADC resolution, 0 = default, 1..12
     fault_volts: float = 10.0        # above this the gauge reads "Gauge Fault"
+    late_after_samples: int = 3      # this many missed sample periods = data is late
 
     # --- CSV logging (Design.pdf: every 10 s, one file per day) -------------
     csv_enabled: bool = True
@@ -61,6 +72,19 @@ class Settings:
     plotted_ains: list[int] = field(default_factory=lambda: [0, 2, 4, 6, 8, 10, 12])
 
     # -----------------------------------------------------------------------
+    def clamped(self) -> Settings:
+        """A copy with every limited field forced into its allowed range."""
+        return replace(
+            self,
+            sample_hz=min(MAX_SAMPLE_HZ, max(MIN_SAMPLE_HZ, float(self.sample_hz))),
+            history_s=min(MAX_HISTORY_S, max(MIN_HISTORY_S, int(self.history_s))),
+            late_after_samples=min(
+                MAX_LATE_AFTER_SAMPLES,
+                max(MIN_LATE_AFTER_SAMPLES, int(self.late_after_samples))),
+            csv_interval_s=min(
+                MAX_CSV_INTERVAL_S, max(MIN_CSV_INTERVAL_S, float(self.csv_interval_s))),
+        )
+
     @classmethod
     def load(cls, path: str = SETTINGS_PATH) -> Settings:
         s = cls()
@@ -73,12 +97,14 @@ class Settings:
         for key, value in raw.items():
             if key in valid:
                 setattr(s, key, value)
-        return s
+        return s.clamped()
 
-    def save(self, path: str = SETTINGS_PATH) -> None:
+    def save(self, path: str = SETTINGS_PATH) -> str:
+        """Write the file. Returns "" on success, else a message for the operator."""
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(asdict(self), fh, indent=2)
-        except OSError:
-            pass  # a read-only install folder should not crash the program
+        except OSError as exc:
+            return f"Settings not saved: {exc}"  # a read-only folder must not crash the app
+        return ""
