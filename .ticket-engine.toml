@@ -1,0 +1,9 @@
+# ticket-engine configuration for IBL Pressure.
+# Integrity gate only; no Jules dispatch yet (the developer adds it later).
+default_branch = "master"
+gate_commands = ["ruff check .", "python scripts/check_tests_first.py", "pytest -q"]
+source_paths = ["src", "main.py"]
+test_paths = ["tests"]
+
+[test_env]
+QT_QPA_PLATFORM = "offscreen"

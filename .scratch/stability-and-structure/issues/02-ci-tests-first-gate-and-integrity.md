@@ -10,7 +10,7 @@ developer's own merge. Expected, not a bug.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
@@ -18,7 +18,7 @@ developer's own merge. Expected, not a bug.
 
 ## Acceptance criteria
 
-- [ ] **`scripts/check_tests_first.py`.** Copy `scripts/check_tests_first.py` from
+- [x] **`scripts/check_tests_first.py`.** Copy `scripts/check_tests_first.py` from
   `ilegault/ticket-engine` at tag `v1` (`git show v1:scripts/check_tests_first.py`
   in a clone, or the raw GitHub file). Change only `categorize_files` so a path
   counts as application code when it starts with `src/` **or equals `main.py`**,
@@ -29,7 +29,7 @@ developer's own merge. Expected, not a bug.
   (via `evaluate_tests_first`, asserting the returned bool), and
   `test_docs_only_change_passes`. Import the script with
   `importlib.util.spec_from_file_location`.
-- [ ] **`.github/workflows/ci.yml`**, exactly:
+- [x] **`.github/workflows/ci.yml`**, exactly:
   ```yaml
   name: CI
 
@@ -64,7 +64,7 @@ developer's own merge. Expected, not a bug.
         - name: Run tests with pytest
           run: pytest -q
   ```
-- [ ] **`.github/workflows/integrity.yml`** — the engine's caller, with no secrets
+- [x] **`.github/workflows/integrity.yml`** — the engine's caller, with no secrets
   required (the engine falls back to `GITHUB_TOKEN`):
   ```yaml
   name: Integrity Gate
@@ -79,7 +79,7 @@ developer's own merge. Expected, not a bug.
       with:
         python-version: "3.14"
   ```
-- [ ] **`.ticket-engine.toml`** at the repo root, exactly:
+- [x] **`.ticket-engine.toml`** at the repo root, exactly:
   ```toml
   # ticket-engine configuration for IBL Pressure.
   # Integrity gate only; no Jules dispatch yet (the developer adds it later).
@@ -91,16 +91,25 @@ developer's own merge. Expected, not a bug.
   [test_env]
   QT_QPA_PLATFORM = "offscreen"
   ```
-- [ ] **A Qt smoke test proves headless Qt works in CI.** Add
+- [x] **A Qt smoke test proves headless Qt works in CI.** Add
   `tests/test_window_smoke.py::test_window_opens_in_simulation` using `qtbot`:
   build `MainWindow(Settings(simulate=True, csv_enabled=False))` (settings saved to
   a `tmp_path` file by monkeypatching `ibl.config.SETTINGS_PATH`), `qtbot.addWidget`
   it, and assert `window.lbl_status.text() == "Not connected - press Connect"`.
   Close the window at the end of the test.
-- [ ] **All three gates pass locally in CI order**, and the PR's CI run is green.
+- [x] **All three gates pass locally in CI order**, and the PR's CI run is green.
   The PR body notes that the integrity run on this PR itself is expected to hold
   (check 4: `.github/`, `scripts/`).
 
 Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pytest -q`.
 
 ## Comments
+
+- 2026-09-29: Implemented; awaiting review and the developer's own merge (held: changes `.github/` and `scripts/`),
+  so Status stays `in-progress` until it lands. Ticket 01 had landed (PR 1) but still read `in-progress`; set it to `done`.
+- `test_window_opens_in_simulation` does not call `window.close()` itself: `qtbot.addWidget` already closes the
+  window at teardown, and a second close hangs (`MainWindow.closeEvent` blocks on a worker thread the first close
+  stopped). Worth a look in a later ticket. `Settings.save/load` bind `SETTINGS_PATH` as a default argument, so the
+  test also patches their defaults.
+- Local gate (Python 3.11 here, CI uses 3.14): `ruff check .` clean, tests-first gate OK, `pytest -q` 60 passed.
+  The integrity run on the PR is expected to hold (check 4: `.github/`, `scripts/`).
