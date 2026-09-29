@@ -8,7 +8,7 @@ ADR 0002; spec §2 *History and plot*.
 
 **Blocked by:** 03
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
@@ -61,3 +61,5 @@ Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pyte
   empty bucket.
 - Local gate: `ruff check .`, `check_tests_first.py` and `pytest` pass, except `test_window_smoke.py`,
   which needs the system Qt libraries this sandbox lacks (CI runs it).
+
+- 2026-09-29: PR #6 merged; marked done.

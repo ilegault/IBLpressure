@@ -8,7 +8,7 @@ cells. Spec §2 *Link state*, *Stale table*; AGENTS.md rules 3–5.
 
 **Blocked by:** 04, 05
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
