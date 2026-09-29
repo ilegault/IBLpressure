@@ -24,7 +24,7 @@ import time
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 
 from .channels import AIN_NAMES, CHANNELS
-from .config import Settings
+from .config import MAX_SAMPLE_HZ, MIN_SAMPLE_HZ, Settings
 from .conversion import convert
 from .model import Sample
 
@@ -130,7 +130,7 @@ class DaqWorker(QObject):
     def _apply_interval(self) -> None:
         if self._timer is None:
             return
-        hz = max(0.05, min(float(self._settings.sample_hz), 20.0))
+        hz = max(MIN_SAMPLE_HZ, min(float(self._settings.sample_hz), MAX_SAMPLE_HZ))
         self._timer.setInterval(round(1000.0 / hz))
 
     # -- device -------------------------------------------------------------

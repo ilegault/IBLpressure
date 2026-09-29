@@ -20,7 +20,9 @@ it takes effect immediately and is remembered in settings.json.
 from __future__ import annotations
 
 import bisect
+import dataclasses
 import os
+import sys
 import time
 
 import numpy as np
@@ -52,7 +54,15 @@ from PySide6.QtWidgets import (
 
 from . import __version__, driver
 from .channels import CHANNELS, PAIRS, pair_index
-from .config import Settings
+from .config import (
+    MAX_CSV_INTERVAL_S,
+    MAX_HISTORY_S,
+    MAX_SAMPLE_HZ,
+    MIN_CSV_INTERVAL_S,
+    MIN_HISTORY_S,
+    MIN_SAMPLE_HZ,
+    Settings,
+)
 from .csvlogger import DailyCsvLogger
 from .daq import DaqWorker
 from .model import GaugeStatus, Sample
@@ -197,6 +207,12 @@ class CompactSpin(QWidget):
         if self._decimals > 0:
             return f"{v:.{self._decimals}f}"
         return str(round(v))
+
+    def minimum(self):
+        return self._min
+
+    def maximum(self):
+        return self._max
 
     def value(self):
         if self._decimals > 0:
@@ -523,7 +539,7 @@ class MainWindow(QMainWindow):
 
         # --- Acquisition ---
         f = add(1, "Acquisition")
-        self.spn_hz = CompactSpin(0.1, 20.0, 2.0, step=0.5, decimals=2, suffix=" Hz")
+        self.spn_hz = CompactSpin(MIN_SAMPLE_HZ, MAX_SAMPLE_HZ, 1.0, step=0.5, decimals=2, suffix=" Hz")
         self.spn_hz.valueChanged.connect(self._on_widget_changed)
         f.addRow("Update rate:", self.spn_hz)
 
@@ -538,7 +554,7 @@ class MainWindow(QMainWindow):
         self.spn_fault.valueChanged.connect(self._on_widget_changed)
         f.addRow("Gauge fault above:", self.spn_fault)
 
-        self.spn_hist = CompactSpin(1, 48, 24, suffix=" hr")
+        self.spn_hist = CompactSpin(MIN_HISTORY_S // 3600, MAX_HISTORY_S // 3600, 24, suffix=" hr")
         self.spn_hist.valueChanged.connect(self._on_widget_changed)
         f.addRow("Keep history:", self.spn_hist)
 
@@ -548,7 +564,7 @@ class MainWindow(QMainWindow):
         self.chk_csv.toggled.connect(self._on_widget_changed)
         f.addRow(self.chk_csv)
 
-        self.spn_csv = CompactSpin(1.0, 3600.0, 60.0, step=1.0, decimals=1, suffix=" s")
+        self.spn_csv = CompactSpin(MIN_CSV_INTERVAL_S, MAX_CSV_INTERVAL_S, 10.0, step=1.0, decimals=1, suffix=" s")
         self.spn_csv.valueChanged.connect(self._on_widget_changed)
         f.addRow("Write every:", self.spn_csv)
 
@@ -578,7 +594,7 @@ class MainWindow(QMainWindow):
         self.spn_curve_width.valueChanged.connect(self._on_widget_changed)
         f.addRow("Line width:", self.spn_curve_width)
 
-        self.spn_curve_alpha = CompactSpin(0, 100, 80, suffix="%")
+        self.spn_curve_alpha = CompactSpin(0, 100, 31, suffix="%")
         self.spn_curve_alpha.valueChanged.connect(self._on_widget_changed)
         f.addRow("Line opacity:", self.spn_curve_alpha)
 
@@ -586,7 +602,7 @@ class MainWindow(QMainWindow):
         self.chk_show_grid.toggled.connect(self._on_widget_changed)
         f.addRow(self.chk_show_grid)
 
-        self.spn_grid_alpha = CompactSpin(0, 100, 50, suffix="%")
+        self.spn_grid_alpha = CompactSpin(0, 100, 30, suffix="%")
         self.spn_grid_alpha.valueChanged.connect(self._on_widget_changed)
         f.addRow("Grid opacity:", self.spn_grid_alpha)
 
@@ -699,13 +715,16 @@ class MainWindow(QMainWindow):
         if self._building:
             return
         s = self._harvest_widgets()
-        s.save()
+        problem = s.save()
+        if problem:
+            self.lbl_status.setText(problem)
+            print(problem, file=sys.stderr)
         self.logger.reconfigure(s.csv_dir, s.csv_include_voltages)
         self.legend.setVisible(s.show_legend)
         self._apply_table_appearance()
         self._apply_curve_appearance()
         self._apply_grid()
-        self.settings_changed.emit(s)
+        self.settings_changed.emit(dataclasses.replace(s))
         self._redraw_plot()
 
     def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
@@ -722,7 +741,10 @@ class MainWindow(QMainWindow):
         if self._building:
             return
         self.settings.dark_mode = checked
-        self.settings.save()
+        problem = self.settings.save()
+        if problem:
+            self.lbl_status.setText(problem)
+            print(problem, file=sys.stderr)
         self._apply_theme()
 
     def _apply_theme(self) -> None:
@@ -874,7 +896,7 @@ class MainWindow(QMainWindow):
     # =====================================================================
     def _start_worker(self) -> None:
         self.thread = QThread(self)
-        self.worker = DaqWorker(self.settings)
+        self.worker = DaqWorker(dataclasses.replace(self.settings))
         self.worker.moveToThread(self.thread)
 
         # Deliberately NOT connected to thread.started: the acquisition
@@ -1032,10 +1054,9 @@ class MainWindow(QMainWindow):
 
     # =====================================================================
     def closeEvent(self, event) -> None:
-        try:
-            self._harvest_widgets().save()
-        except Exception:  # noqa: BLE001, S110 - pre-existing best-effort cleanup, error ignored
-            pass
+        problem = self._harvest_widgets().save()
+        if problem:
+            print(problem, file=sys.stderr)  # the window is closing; stderr is all we have
         # Use a blocking call so the worker's stop() (and LJM handle close)
         # finishes on the worker thread before we quit it.  A queued emit
         # would race with thread.quit() and could leave the device open.
