@@ -7,7 +7,7 @@ instead of module globals. Behaviour does not change. Spec §2 *Structure*.
 
 **Blocked by:** 06, 08, 09, 10
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
