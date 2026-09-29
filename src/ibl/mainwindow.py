@@ -76,7 +76,12 @@ from .config import (
     Settings,
     late_preview,
 )
-from .csvlogger import DailyCsvLogger, estimate_bytes_per_day, format_size_preview
+from .csvlogger import (
+    DailyCsvLogger,
+    estimate_bytes_per_day,
+    format_size_preview,
+    load_recent_history,
+)
 from .daq import DaqWorker
 from .history import RAW_SPAN_S, SUMMARY_BUCKET_S, History, minmax_decimate, redraw_interval_s
 from .link import DOT_COLORS, LinkMonitor, LinkState
@@ -256,6 +261,7 @@ class MainWindow(QMainWindow):
         self._load_settings_into_widgets()
         self._building = False
 
+        self._reload_history_from_csv()
         self._start_worker()
 
         # Ages the status line and the STALE table even when no event arrives.
@@ -1082,6 +1088,16 @@ class MainWindow(QMainWindow):
             if r.pressure is not None and r.pressure > 0:
                 row[self._chan_index[r.ain]] = r.pressure
         self.history.append(sample.timestamp, row)
+
+    def _reload_history_from_csv(self) -> None:
+        """Refill the plot from yesterday's and today's Daily CSVs, once, at startup."""
+        loaded, skipped = load_recent_history(
+            self.settings.csv_dir, self._now(), self.settings.history_s, self.history)
+        if loaded or skipped:
+            text = f"History reloaded: {loaded} rows from CSV"
+            if skipped:
+                text += f" ({skipped} unreadable lines skipped)"
+            self.lbl_csv.setText(text)
 
     def _maybe_write_csv(self, sample: Sample) -> None:
         if not self.settings.csv_enabled:

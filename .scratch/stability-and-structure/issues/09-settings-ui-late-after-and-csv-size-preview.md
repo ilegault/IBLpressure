@@ -6,7 +6,7 @@ the 10 Hz / 24 h limits in the panel. Spec §2 *Settings*.
 
 **Blocked by:** 04, 06
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
@@ -50,3 +50,4 @@ Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pyte
 
 ## Comments
 - 2026-09-29: Implemented. `late_preview` in `config.py`; `header`, `format_row`, `estimate_bytes_per_day`, `format_size_preview` in `csvlogger.py`; Late-after spin, its preview and the CSV size label in the settings panel. The size estimate uses a realistic epoch timestamp so its row width matches real rows. Ticket stays in-progress until the PR merges.
+- 2026-09-29: PR merged, ticket set to done.
