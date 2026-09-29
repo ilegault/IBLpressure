@@ -190,6 +190,11 @@ def minmax_decimate(
     return t_out, p_out
 
 
+def redraw_interval_s(span_s: float, plot_width_px: float, sample_hz: float) -> float:
+    """Seconds between plot redraws: one pixel's worth of time, never faster than the samples."""
+    return max(1.0 / sample_hz, span_s / max(1.0, plot_width_px))
+
+
 def _first_match(mask: np.ndarray, gid: np.ndarray) -> np.ndarray:
     """Index of the first True in each group (every group has at least one)."""
     idx = np.flatnonzero(mask)

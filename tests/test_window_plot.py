@@ -81,20 +81,20 @@ def test_24h_view_hands_bounded_points_to_curves(window, clock):
     for ch in CHANNELS:
         curve = window.curves[ch.ain]
         assert curve.isVisible()
-        x, y = curve.getData()
+        _x, y = curve.getData()
         assert 0 < np.isfinite(y).sum() <= 2000
 
 
 def test_gap_is_not_bridged(window, clock):
     _plot_all(window)
-    for t in list(range(0, 11)) + list(range(40, 51)):
+    for t in list(range(11)) + list(range(40, 51)):
         _feed(window, clock, float(t))
     window._redraw_plot()
-    x, y = window.curves[CHANNELS[0].ain].getData()
-    finite = np.isfinite(y)
-    assert (~finite).any()
-    first_nan = np.flatnonzero(~finite)[0]
-    assert finite[:first_nan].any() and finite[first_nan + 1:].any()
+    _x, y = window.curves[CHANNELS[0].ain].getData()
+    finite = np.flatnonzero(np.isfinite(y))
+    # the 30 s silence is a break in the line: a NaN sits between two finite points
+    between = y[finite[0]:finite[-1] + 1]
+    assert np.isnan(between).any()
 
 
 def test_long_span_skips_redundant_redraws(window, clock, monkeypatch):
@@ -133,7 +133,7 @@ def test_clear_history_empties_history_and_curves(window, clock):
         _feed(window, clock, float(t))
     window._redraw_plot()
     window._clear_history()
-    t, lo, hi = window.history.window(0, -1e12, 1e12)
+    t, _lo, _hi = window.history.window(0, -1e12, 1e12)
     assert len(t) == 0
     x, y = window.curves[CHANNELS[0].ain].getData()
     assert x is None or np.isfinite(y).sum() == 0
