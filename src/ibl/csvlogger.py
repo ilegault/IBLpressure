@@ -15,7 +15,7 @@ import datetime as _dt
 import os
 
 from .channels import CHANNELS
-from .daq import Sample
+from .model import Sample
 
 
 class DailyCsvLogger:
@@ -73,7 +73,7 @@ class DailyCsvLogger:
             if r is None:
                 row.append("")
             elif r.pressure is None:
-                row.append(r.status)
+                row.append(r.status.value)
             else:
                 row.append(f"{r.pressure:.4E}")
         if self.include_voltages:

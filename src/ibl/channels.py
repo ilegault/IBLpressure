@@ -50,3 +50,21 @@ CHANNELS: tuple[Channel, ...] = (
 
 # Register names handed to the LJM library, e.g. "AIN0".
 AIN_NAMES: list[str] = [f"AIN{c.ain}" for c in CHANNELS]
+
+# One entry per Location, in wiring order, and its Ion Gauge / Convectron pair.
+LOCATIONS: tuple[str, ...] = tuple(dict.fromkeys(c.location for c in CHANNELS))
+PAIRS: tuple[tuple[Channel, Channel], ...] = tuple(
+    (
+        next(c for c in CHANNELS if c.location == loc and c.is_ion),
+        next(c for c in CHANNELS if c.location == loc and not c.is_ion),
+    )
+    for loc in LOCATIONS
+)
+
+
+def pair_index(ain: int) -> int:
+    """Index into PAIRS of the gauge pair that contains this analog input."""
+    for i, pair in enumerate(PAIRS):
+        if any(c.ain == ain for c in pair):
+            return i
+    raise ValueError(f"AIN{ain} is not wired to any Location")

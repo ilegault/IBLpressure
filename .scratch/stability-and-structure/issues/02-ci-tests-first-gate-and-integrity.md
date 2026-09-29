@@ -10,7 +10,7 @@ developer's own merge. Expected, not a bug.
 
 **Blocked by:** 01
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
