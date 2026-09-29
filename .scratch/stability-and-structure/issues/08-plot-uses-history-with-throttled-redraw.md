@@ -7,7 +7,7 @@ the 12 h / 24 h freeze. ADR 0002; spec §2 *History and plot*.
 
 **Blocked by:** 06, 07
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
@@ -51,3 +51,4 @@ Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pyte
 
 ## Comments
 - 2026-09-29: Implemented. `MainWindow.history` replaces `Series`; the plot draws `minmax_decimate` output (`n_buckets = max(100, plot width)`, `gap_s = link.late_threshold_s`); `_on_sample` redraws only every `redraw_interval_s`; other triggers redraw at once. Ticket stays in-progress until the PR merges.
+- 2026-09-29: PR merged (#8); marked done.

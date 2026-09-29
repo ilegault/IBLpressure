@@ -36,6 +36,11 @@ MIN_CSV_INTERVAL_S = 1.0
 MAX_CSV_INTERVAL_S = 3600.0
 
 
+def late_preview(late_after_samples: int, sample_hz: float) -> str:
+    """The Late-after setting in seconds, e.g. '= 3.0 s at 1 Hz'."""
+    return f"= {late_after_samples / sample_hz:.1f} s at {sample_hz:g} Hz"
+
+
 @dataclass
 class Settings:
     # --- LabJack connection -------------------------------------------------

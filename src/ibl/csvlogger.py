@@ -12,10 +12,68 @@ from __future__ import annotations
 
 import csv
 import datetime as _dt
+import io
+import math
 import os
 
 from .channels import CHANNELS
+from .config import Settings
+from .conversion import convert
 from .model import Sample
+
+
+def header(include_voltages: bool) -> list[str]:
+    cols = ["timestamp", "epoch_s"]
+    cols += [f"{c.name} (Torr)" for c in CHANNELS]
+    if include_voltages:
+        cols += [f"AIN{c.ain} (V)" for c in CHANNELS]
+    return cols
+
+
+def format_row(sample: Sample, include_voltages: bool) -> list[str]:
+    """One CSV row, as text, for one Sample."""
+    when = _dt.datetime.fromtimestamp(sample.timestamp)  # noqa: DTZ006 - file names use the PC's local calendar day
+    by_ain = sample.by_ain()
+    row = [when.isoformat(timespec="seconds"), f"{sample.timestamp:.3f}"]
+    for ch in CHANNELS:
+        r = by_ain.get(ch.ain)
+        if r is None:
+            row.append("")
+        elif r.pressure is None:
+            row.append(r.status.value)
+        else:
+            row.append(f"{r.pressure:.4E}")
+    if include_voltages:
+        for ch in CHANNELS:
+            r = by_ain.get(ch.ain)
+            row.append("" if r is None else f"{r.voltage:.5f}")
+    return row
+
+
+def _csv_bytes(row: list[str]) -> int:
+    buf = io.StringIO()
+    csv.writer(buf).writerow(row)
+    return len(buf.getvalue().encode("utf-8"))
+
+
+# Any present-day instant: the epoch column has the same width until the year 2286.
+_TYPICAL_TIMESTAMP = 1_800_000_000.0
+
+
+def estimate_bytes_per_day(interval_s: float, include_voltages: bool) -> int:
+    """Header plus one day of rows, each measured on a typical all-OK Sample."""
+    typical = Sample(_TYPICAL_TIMESTAMP, [
+        convert(c.ain, 7.0 if c.is_ion else 0.435, c.is_ion, Settings().fault_volts)
+        for c in CHANNELS
+    ])
+    row_bytes = _csv_bytes(format_row(typical, include_voltages))
+    return _csv_bytes(header(include_voltages)) + math.ceil(86400 / interval_s) * row_bytes
+
+
+def format_size_preview(nbytes: int, rows: int) -> str:
+    if nbytes < 1024 * 1024:
+        return f"≈ {nbytes / 1024:.1f} KB per day ({rows:,} rows)"
+    return f"≈ {nbytes / (1024 * 1024):.1f} MB per day ({rows:,} rows)"
 
 
 class DailyCsvLogger:
@@ -30,11 +88,7 @@ class DailyCsvLogger:
 
     # -- header --------------------------------------------------------------
     def _header(self) -> list[str]:
-        cols = ["timestamp", "epoch_s"]
-        cols += [f"{c.name} (Torr)" for c in CHANNELS]
-        if self.include_voltages:
-            cols += [f"AIN{c.ain} (V)" for c in CHANNELS]
-        return cols
+        return header(self.include_voltages)
 
     # -- file rotation -------------------------------------------------------
     def _ensure_file(self, when: _dt.datetime) -> bool:
@@ -66,20 +120,7 @@ class DailyCsvLogger:
         if not self._ensure_file(when):
             return False
 
-        by_ain = sample.by_ain()
-        row: list[object] = [when.isoformat(timespec="seconds"), f"{sample.timestamp:.3f}"]
-        for ch in CHANNELS:
-            r = by_ain.get(ch.ain)
-            if r is None:
-                row.append("")
-            elif r.pressure is None:
-                row.append(r.status.value)
-            else:
-                row.append(f"{r.pressure:.4E}")
-        if self.include_voltages:
-            for ch in CHANNELS:
-                r = by_ain.get(ch.ain)
-                row.append("" if r is None else f"{r.voltage:.5f}")
+        row = format_row(sample, self.include_voltages)
 
         try:
             self._writer.writerow(row)   # type: ignore[union-attr]
