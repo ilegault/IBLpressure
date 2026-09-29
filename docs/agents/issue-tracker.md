@@ -65,6 +65,13 @@ Exactly these five words, and nothing else:
 | `blocked` | escalated — see the `## Comments` entry and the draft PR |
 | `ready-for-developer` | needs a person: bench work on the real T7, a Windows build, a lab decision. **An agent must not claim it.** |
 
+**Merged means done.** A ticket is `done` the moment its PR merges, and not before.
+While the PR is open the ticket stays `in-progress`. Whoever notices a merged ticket
+still marked `in-progress` (a worker starting the next ticket, or the developer)
+sets it to `done`, ticks any unticked criteria and adds a dated `## Comments` line.
+The frontier only unblocks dependent tickets when their blockers say `done`, so a
+stale `in-progress` on a merged ticket stalls every ticket behind it.
+
 Three spellings of "finished" make the frontier unreadable by the next tool that
 opens the repo. Use the word in the table. `human-task` is a legacy spelling of
 `ready-for-developer`; the dispatcher reports it as unreadable.
