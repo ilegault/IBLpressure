@@ -1,6 +1,7 @@
 """Settings limits, clamping on load, and honest save errors."""
 import json
 
+from ibl import config
 from ibl.config import Settings
 
 
@@ -42,3 +43,8 @@ def test_save_reports_unwritable_path(tmp_path):
 
 def test_save_returns_empty_string_on_success(tmp_path):
     assert Settings().save(str(tmp_path / "settings.json")) == ""
+
+
+def test_late_preview_states_seconds_and_rate():
+    assert config.late_preview(3, 1.0) == "= 3.0 s at 1 Hz"
+    assert config.late_preview(2, 0.5) == "= 4.0 s at 0.5 Hz"

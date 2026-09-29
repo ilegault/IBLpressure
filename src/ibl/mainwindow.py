@@ -67,13 +67,16 @@ from .channels import CHANNELS, PAIRS, pair_index
 from .config import (
     MAX_CSV_INTERVAL_S,
     MAX_HISTORY_S,
+    MAX_LATE_AFTER_SAMPLES,
     MAX_SAMPLE_HZ,
     MIN_CSV_INTERVAL_S,
     MIN_HISTORY_S,
+    MIN_LATE_AFTER_SAMPLES,
     MIN_SAMPLE_HZ,
     Settings,
+    late_preview,
 )
-from .csvlogger import DailyCsvLogger
+from .csvlogger import DailyCsvLogger, estimate_bytes_per_day, format_size_preview
 from .daq import DaqWorker
 from .history import RAW_SPAN_S, SUMMARY_BUCKET_S, History, minmax_decimate, redraw_interval_s
 from .link import DOT_COLORS, LinkMonitor, LinkState
@@ -544,6 +547,21 @@ class MainWindow(QMainWindow):
         self.spn_hz.valueChanged.connect(self._on_widget_changed)
         f.addRow("Update rate:", self.spn_hz)
 
+        self.spn_late = CompactSpin(MIN_LATE_AFTER_SAMPLES, MAX_LATE_AFTER_SAMPLES, 3,
+                                    suffix=" samples")
+        tip = ("The status turns amber (Late) and the table shows STALE "
+               "when this many samples in a row are missing.")
+        self.spn_late.setToolTip(tip)
+        self.spn_late.valueChanged.connect(self._on_widget_changed)
+        self.lbl_late_preview = QLabel()
+        self.lbl_late_preview.setToolTip(tip)
+        late_row = QHBoxLayout()
+        late_row.addWidget(self.spn_late)
+        late_row.addWidget(self.lbl_late_preview, 1)
+        late_wrap = QWidget()
+        late_wrap.setLayout(late_row)
+        f.addRow("Late after:", late_wrap)
+
         self.spn_fault = CompactSpin(1.0, 12.0, 10.0, step=0.1, decimals=2, suffix=" V")
         self.spn_fault.setToolTip(
             "Above this the channel reads Gauge Fault.\n"
@@ -568,6 +586,10 @@ class MainWindow(QMainWindow):
         self.spn_csv = CompactSpin(MIN_CSV_INTERVAL_S, MAX_CSV_INTERVAL_S, 10.0, step=1.0, decimals=1, suffix=" s")
         self.spn_csv.valueChanged.connect(self._on_widget_changed)
         f.addRow("Write every:", self.spn_csv)
+
+        self.lbl_csv_size = QLabel()
+        self.lbl_csv_size.setToolTip("Estimated size of one day's file at this interval.")
+        f.addRow(self.lbl_csv_size)
 
         folder_row = QHBoxLayout()
         self.txt_csvdir = QLineEdit()
@@ -648,6 +670,7 @@ class MainWindow(QMainWindow):
         self.spn_res.setValue(int(s.resolution_index))
         self.spn_hz.setValue(float(s.sample_hz))
         self.spn_fault.setValue(float(s.fault_volts))
+        self.spn_late.setValue(int(s.late_after_samples))
         self.spn_hist.setValue(max(1, round(s.history_s / 3600)))
         self.chk_csv.setChecked(s.csv_enabled)
         self.spn_csv.setValue(float(s.csv_interval_s))
@@ -681,6 +704,7 @@ class MainWindow(QMainWindow):
             self.curves[ig_ain].setVisible(ig_ain in wanted)
             self.curves[cg_ain].setVisible(cg_ain in wanted)
         self._rebuild_legend()
+        self._update_previews(s)
 
     def _harvest_widgets(self) -> Settings:
         s = self.settings
@@ -690,6 +714,7 @@ class MainWindow(QMainWindow):
         s.resolution_index = self.spn_res.value()
         s.sample_hz = self.spn_hz.value()
         s.fault_volts = self.spn_fault.value()
+        s.late_after_samples = self.spn_late.value()
         s.history_s = self.spn_hist.value() * 3600
         s.csv_enabled = self.chk_csv.isChecked()
         s.csv_interval_s = self.spn_csv.value()
@@ -712,10 +737,17 @@ class MainWindow(QMainWindow):
         ]
         return s
 
+    def _update_previews(self, s: Settings) -> None:
+        self.lbl_late_preview.setText(late_preview(s.late_after_samples, s.sample_hz))
+        rows = math.ceil(86400 / s.csv_interval_s)
+        self.lbl_csv_size.setText(format_size_preview(
+            estimate_bytes_per_day(s.csv_interval_s, s.csv_include_voltages), rows))
+
     def _on_widget_changed(self, *_args) -> None:
         if self._building:
             return
         s = self._harvest_widgets()
+        self._update_previews(s)
         self._settings_problem = s.save()
         if self._settings_problem:
             print(self._settings_problem, file=sys.stderr)

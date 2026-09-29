@@ -6,7 +6,7 @@ the 10 Hz / 24 h limits in the panel. Spec §2 *Settings*.
 
 **Blocked by:** 04, 06
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
@@ -14,7 +14,7 @@ the 10 Hz / 24 h limits in the panel. Spec §2 *Settings*.
 
 ## Acceptance criteria
 
-- [ ] **Pure preview helpers.** In `config.py`:
+- [x] **Pure preview helpers.** In `config.py`:
   `late_preview(late_after_samples: int, sample_hz: float) -> str` returning
   `= {seconds:.1f} s at {hz:g} Hz`. In `csvlogger.py`:
   `estimate_bytes_per_day(interval_s: float, include_voltages: bool) -> int` =
@@ -30,22 +30,23 @@ the 10 Hz / 24 h limits in the panel. Spec §2 *Settings*.
   **the estimate matches reality**: write 100 rows with `DailyCsvLogger` into
   `tmp_path`, and assert the file size is within 2 % of
   `header + 100 * row_bytes` from the same formula.
-- [ ] **Late after control.** In the *Acquisition* group, add
+- [x] **Late after control.** In the *Acquisition* group, add
   `Late after:` → `CompactSpin(MIN_LATE_AFTER_SAMPLES, MAX_LATE_AFTER_SAMPLES, 3, suffix=" samples")`
   bound to `settings.late_after_samples`, with a `QLabel` beside it showing
   `late_preview(...)`, updated when either the spin or the update rate changes.
   Tooltip: `The status turns amber (Late) and the table shows STALE when this many samples in a row are missing.`
   Test: set rate 0.5 Hz and late-after 2 → label text `= 4.0 s at 0.5 Hz` and the
   window's `LinkMonitor.late_threshold_s == 4.0`.
-- [ ] **CSV size preview.** In the *CSV logging* group, a `QLabel` under *Write
+- [x] **CSV size preview.** In the *CSV logging* group, a `QLabel` under *Write
   every* shows `format_size_preview(...)` for the current interval and raw-volts
   checkbox, updated live. Test: interval 10 s, no volts → text ends
   `(8,640 rows)`; ticking *Also record raw volts* makes the size larger.
-- [ ] **Limits in the UI.** The rate spin cannot exceed 10 Hz, the history spin
+- [x] **Limits in the UI.** The rate spin cannot exceed 10 Hz, the history spin
   cannot exceed 24 hr (both from `config.py`). Test: `spn_hz.setValue(20)` →
   `spn_hz.value() == 10.0` and `window.settings.sample_hz == 10.0`.
-- [ ] Full gate green.
+- [x] Full gate green.
 
 Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pytest -q`.
 
 ## Comments
+- 2026-09-29: Implemented. `late_preview` in `config.py`; `header`, `format_row`, `estimate_bytes_per_day`, `format_size_preview` in `csvlogger.py`; Late-after spin, its preview and the CSV size label in the settings panel. The size estimate uses a realistic epoch timestamp so its row width matches real rows. Ticket stays in-progress until the PR merges.

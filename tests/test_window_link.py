@@ -194,3 +194,26 @@ def test_settings_problem_is_not_overwritten_by_the_timer(window, clock):
 def test_render_timer_runs_every_500_ms(window):
     assert window._link_timer.isActive()
     assert window._link_timer.interval() == 500
+
+
+def test_late_after_control_shows_seconds_and_drives_the_monitor(window):
+    window.spn_hz.setValue(0.5)
+    window.spn_late.setValue(2)
+    assert window.lbl_late_preview.text() == "= 4.0 s at 0.5 Hz"
+    assert window.link.late_threshold_s == 4.0
+    assert window.settings.late_after_samples == 2
+
+
+def test_csv_size_preview_follows_interval_and_volts(window):
+    window.spn_csv.setValue(10)
+    window.chk_csvv.setChecked(False)
+    text = window.lbl_csv_size.text()
+    assert text.endswith("(8,640 rows)")
+    window.chk_csvv.setChecked(True)
+    assert window.lbl_csv_size.text() != text
+
+
+def test_rate_cannot_exceed_ten_hz(window):
+    window.spn_hz.setValue(20)
+    assert window.spn_hz.value() == 10.0
+    assert window.settings.sample_hz == 10.0
