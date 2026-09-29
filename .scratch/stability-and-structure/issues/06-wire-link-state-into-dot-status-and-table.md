@@ -8,7 +8,7 @@ cells. Spec §2 *Link state*, *Stale table*; AGENTS.md rules 3–5.
 
 **Blocked by:** 04, 05
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
@@ -62,3 +62,4 @@ Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pyte
 ## Comments
 
 - 2026-09-29: Implemented. Extras beyond the criteria: `tests/test_daq.py` (fake LJM) covers the new worker signals; a settings-save failure is now kept in `_settings_problem` and prefixed to the status line so the 500 ms redraw cannot erase it; on Disconnect/Down the last Sample stays in the table as STALE (rule 4). Driver-missing text only shows while DOWN, so at startup (Idle) only the Install button is visible.
+- 2026-09-29: Merged (PR #7); status set to done.

@@ -196,3 +196,12 @@ def test_24h_window_decimates_fast():
     # The plot redraws on the GUI thread; anything near a second is the freeze
     # this effort fixes, so 0.25 s for all seven curves is the budget.
     assert elapsed < 0.25
+
+
+def test_redraw_interval():
+    from ibl.history import redraw_interval_s
+
+    assert redraw_interval_s(300, 1000, 1.0) == 1.0
+    assert redraw_interval_s(86_400, 1000, 1.0) == 86.4
+    # a fast sample rate never asks for redraws faster than the samples arrive
+    assert redraw_interval_s(60, 1000, 2.0) == 0.5

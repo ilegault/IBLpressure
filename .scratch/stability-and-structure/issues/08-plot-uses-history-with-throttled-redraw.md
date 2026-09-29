@@ -7,7 +7,7 @@ the 12 h / 24 h freeze. ADR 0002; spec §2 *History and plot*.
 
 **Blocked by:** 06, 07
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
