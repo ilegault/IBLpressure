@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from ..channels import CHANNELS
 from ..config import Settings
+from ..help_text import HELP_HINT
 from ..history import (
     RAW_SPAN_S,
     SUMMARY_BUCKET_S,
@@ -87,8 +88,9 @@ class PlotPanel(QWidget):
         self.lbl_plot_note = QLabel(
             f"Older than {RAW_SPAN_S // 3600} h: min/max per {SUMMARY_BUCKET_S} s")
         self.lbl_plot_note.setToolTip(
-            "Only the most recent hour is kept sample by sample; older data is "
-            "summarised as the lowest and highest reading of each 10 s, so spikes still show.")
+            f"Only the most recent {RAW_SPAN_S // 3600} h is kept sample by sample; older "
+            f"data is summarised as the lowest and highest reading of each "
+            f"{SUMMARY_BUCKET_S} s, so spikes still show. {HELP_HINT}")
         self.lbl_plot_note.setVisible(False)
         lay.addWidget(self.lbl_plot_note)
         lay.addWidget(self.plot, 1)

@@ -117,6 +117,17 @@ convenience.
 
 ---
 
+## Using the app
+
+Press **Help** (or **F1**) in the top bar for "How IBL Pressure works": what the status
+light colours mean, when the table shows STALE, the gauge status colours, how the plot
+summarises long time spans, and how the daily CSV files are named and appended. The
+text is generated from the same constants the app uses, so it stays correct when
+settings change. Hover over the light, the status line, the plot caption, *Late after*
+or the CSV size for a short explanation.
+
+---
+
 ## Code layout
 
 ```
@@ -127,12 +138,14 @@ src/ibl/
   daq.py         — DaqWorker (separate QThread, auto-reconnects on failure)
   config.py      — Settings dataclass, settings.json load/save
   driver.py      — LJM driver check + one-click installer launch
+  help_text.py   — the Help text (Qt-free, built from the real constants)
   mainwindow.py  — the single PySide6 window: wires the panels to worker, link, history, CSV
   ui/            — the panels, widgets only
     widgets.py       CompactSpin, TorrAxis
     topbar.py        TopBar: connect, simulation, dark mode, dot, status, CSV label
     table_panel.py   TablePanel: the 14-gauge table and plot checkboxes
     plot_panel.py    PlotPanel: span, Y range, curves, legend, grid, caption
+    help_dialog.py   HelpDialog: the read-only Help window
     settings_panel.py SettingsPanel: load(settings) / harvest(settings)
 tests/           — pytest suite (run `pytest -q`)
 main.py          — entry point (`python main.py`)

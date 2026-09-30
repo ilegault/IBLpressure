@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import driver
+from ..help_text import HELP_HINT
 from ..link import DOT_COLORS, LinkState
 
 DOT = "●"
@@ -28,6 +30,7 @@ class TopBar(QWidget):
     connect_clicked = Signal()
     install_clicked = Signal()
     open_log_clicked = Signal()
+    help_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,10 +53,15 @@ class TopBar(QWidget):
         self.lbl_link = QLabel(DOT)
         self.lbl_link.setStyleSheet(_dot_style(DOT_COLORS[LinkState.IDLE]))
         self.lbl_link.setFixedWidth(16)
+        self.lbl_link.setToolTip(
+            "Link status: grey = not connected, green = live, amber = late or "
+            f"connecting, red = T7 not found. {HELP_HINT}")
         bar.addWidget(self.lbl_link)
 
         self.lbl_status = QLabel("")
         self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.lbl_status.setToolTip(
+            f"Says whether fresh data is arriving from the T7. {HELP_HINT}")
         bar.addWidget(self.lbl_status, 1)
 
         self.btn_install = QPushButton("Install driver")
@@ -69,6 +77,12 @@ class TopBar(QWidget):
         btn_open = QPushButton("Open log folder")
         btn_open.clicked.connect(self.open_log_clicked)
         bar.addWidget(btn_open)
+
+        self.btn_help = QPushButton("Help")
+        self.btn_help.setToolTip("How IBL Pressure works (F1).")
+        self.btn_help.clicked.connect(self.help_clicked)
+        bar.addWidget(self.btn_help)
+        QShortcut(QKeySequence("F1"), self, activated=self.help_clicked)
 
     def show_link(self, dot_color: str, text: str) -> None:
         """Draw the dot and the status line; called only from MainWindow._render_link."""
