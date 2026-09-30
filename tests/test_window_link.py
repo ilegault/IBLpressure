@@ -9,15 +9,10 @@ from ibl import config
 from ibl.channels import CHANNELS, PAIRS
 from ibl.config import Settings
 from ibl.conversion import convert
-from ibl.mainwindow import (
-    COL_CG_PRESS,
-    COL_CG_STATUS,
-    COL_IG_PRESS,
-    COL_IG_STATUS,
-    MainWindow,
-)
+from ibl.mainwindow import MainWindow
 from ibl.model import Sample
-from ibl.theme import LIGHT_THEME
+from ibl.theme import DARK_THEME, LIGHT_THEME
+from ibl.ui.table_panel import COL_CG_PRESS, COL_CG_STATUS, COL_IG_PRESS, COL_IG_STATUS
 
 GREEN, AMBER = "#2ca02c", "#ff9f1a"
 
@@ -64,16 +59,16 @@ def _connect(window, clock):
 
 
 def _dot(window):
-    return window.lbl_link.styleSheet()
+    return window.topbar.lbl_link.styleSheet()
 
 
 def _pressure_cells(window):
-    return [window.table.item(p, c) for p in range(len(PAIRS))
+    return [window.table_panel.table.item(p, c) for p in range(len(PAIRS))
             for c in (COL_IG_PRESS, COL_CG_PRESS)]
 
 
 def _status_cells(window):
-    return [window.table.item(p, c) for p in range(len(PAIRS))
+    return [window.table_panel.table.item(p, c) for p in range(len(PAIRS))
             for c in (COL_IG_STATUS, COL_CG_STATUS)]
 
 
@@ -88,7 +83,7 @@ def test_dot_turns_green_again_after_late(window, clock):
     clock.t = 5.2
     window._on_sample(_sample(5.2))
     assert GREEN in _dot(window)
-    assert window.lbl_status.text().startswith("Live · Recovered at")
+    assert window.topbar.lbl_status.text().startswith("Live · Recovered at")
 
 
 def test_pressure_cells_go_stale(window, clock):
@@ -103,8 +98,8 @@ def test_pressure_cells_go_stale(window, clock):
     for pair, (ig, cg) in enumerate(PAIRS):
         for col, status_col, ch in ((COL_IG_PRESS, COL_IG_STATUS, ig),
                                     (COL_CG_PRESS, COL_CG_STATUS, cg)):
-            press = window.table.item(pair, col)
-            status = window.table.item(pair, status_col)
+            press = window.table_panel.table.item(pair, col)
+            status = window.table_panel.table.item(pair, status_col)
             assert press.text() == "STALE"
             assert status.text() == f"last {by_ain[ch.ain].display_text()}, 5 s ago"
             assert press.background().color().name() == LIGHT_THEME["stale_bg"]
@@ -130,7 +125,7 @@ def test_one_faulted_gauge_does_not_affect_link(window, clock):
     window._render_link()
 
     assert GREEN in _dot(window)
-    assert window.lbl_status.text().startswith("Live")
+    assert window.topbar.lbl_status.text().startswith("Live")
     cells = _pressure_cells(window)
     assert cells[0].text() == "Gauge Fault"
     assert cells[0].background().color().name() == LIGHT_THEME["fault_bg"]
@@ -144,11 +139,11 @@ def test_read_error_clears_on_next_sample(window, clock):
     window._on_sample(_sample(1.0))
 
     window._on_read_error("timeout")
-    assert window.lbl_status.text().endswith("read error: timeout")
+    assert window.topbar.lbl_status.text().endswith("read error: timeout")
 
     clock.t = 2.0
     window._on_sample(_sample(2.0))
-    assert "read error" not in window.lbl_status.text()
+    assert "read error" not in window.topbar.lbl_status.text()
 
 
 def test_disconnect_does_not_leave_numbers_on_screen(window, clock):
@@ -159,7 +154,7 @@ def test_disconnect_does_not_leave_numbers_on_screen(window, clock):
     clock.t = 1.0
     window._render_link()
 
-    assert window.lbl_status.text() == "Not connected. Press Connect."
+    assert window.topbar.lbl_status.text() == "Not connected. Press Connect."
     assert all(c.text() == "STALE" for c in _pressure_cells(window))
 
 
@@ -171,7 +166,7 @@ def test_link_down_shows_reason_and_stales_table(window, clock):
     window._on_link_down("no device")
 
     assert "#d62728" in _dot(window)
-    assert "no device" in window.lbl_status.text()
+    assert "no device" in window.topbar.lbl_status.text()
     assert all(c.text() == "STALE" for c in _pressure_cells(window))
 
 
@@ -188,7 +183,7 @@ def test_settings_problem_is_not_overwritten_by_the_timer(window, clock):
     window._settings_problem = "Settings not saved: disk full"
     window._render_link()
 
-    assert window.lbl_status.text().startswith("Settings not saved:")
+    assert window.topbar.lbl_status.text().startswith("Settings not saved:")
 
 
 def test_render_timer_runs_every_500_ms(window):
@@ -197,23 +192,36 @@ def test_render_timer_runs_every_500_ms(window):
 
 
 def test_late_after_control_shows_seconds_and_drives_the_monitor(window):
-    window.spn_hz.setValue(0.5)
-    window.spn_late.setValue(2)
-    assert window.lbl_late_preview.text() == "= 4.0 s at 0.5 Hz"
+    window.settings_panel.spn_hz.setValue(0.5)
+    window.settings_panel.spn_late.setValue(2)
+    assert window.settings_panel.lbl_late_preview.text() == "= 4.0 s at 0.5 Hz"
     assert window.link.late_threshold_s == 4.0
     assert window.settings.late_after_samples == 2
 
 
 def test_csv_size_preview_follows_interval_and_volts(window):
-    window.spn_csv.setValue(10)
-    window.chk_csvv.setChecked(False)
-    text = window.lbl_csv_size.text()
+    window.settings_panel.spn_csv.setValue(10)
+    window.settings_panel.chk_csvv.setChecked(False)
+    text = window.settings_panel.lbl_csv_size.text()
     assert text.endswith("(8,640 rows)")
-    window.chk_csvv.setChecked(True)
-    assert window.lbl_csv_size.text() != text
+    window.settings_panel.chk_csvv.setChecked(True)
+    assert window.settings_panel.lbl_csv_size.text() != text
 
 
 def test_rate_cannot_exceed_ten_hz(window):
-    window.spn_hz.setValue(20)
-    assert window.spn_hz.value() == 10.0
+    window.settings_panel.spn_hz.setValue(20)
+    assert window.settings_panel.spn_hz.value() == 10.0
     assert window.settings.sample_hz == 10.0
+
+
+def test_dark_mode_changes_stale_colour(window, clock):
+    _connect(window, clock)
+    window._on_sample(_sample(0.0))
+
+    window.topbar.chk_dark.setChecked(True)
+    clock.t = 5.0
+    window._render_link()
+
+    cell = window.table_panel.table.item(0, COL_IG_PRESS)
+    assert cell.text() == "STALE"
+    assert cell.background().color().name() == DARK_THEME["stale_bg"]

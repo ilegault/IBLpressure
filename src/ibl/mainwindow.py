@@ -1,18 +1,10 @@
 """
-The one and only window.
+The one and only window: it wires the panels to the worker, the LinkMonitor,
+the History and the CSV logger.  The widgets live in `ibl.ui`.
 
-Layout:
-
-    +--------------------------------------------------------------+
-    | [Connect] [x] Simulation      status text ...        CSV: ... |
-    +----------------------------+---------------------------------+
-    | live table, 14 rows        | time span [5 min v] [x] auto Y  |
-    | Plot|Location|Gauge|AIN|   |                                 |
-    |     |Volts|Pressure|Status |      log-scale pressure plot     |
-    | [All][None][IG][CG]        |                                 |
-    +----------------------------+---------------------------------+
-    | v Settings  (collapsible: link, rates, fault level, CSV, ...) |
-    +--------------------------------------------------------------+
+    TopBar        connect, simulation, dot, status text, CSV label
+    PlotPanel     | TablePanel (14 gauges, 7 rows)
+    SettingsPanel (collapsible)
 
 Link state (the dot and the status line):
 
@@ -23,210 +15,39 @@ Link state (the dot and the status line):
 
 A number is only shown in a pressure cell while the Link is Live; otherwise the
 cell shows STALE and the last value moves to the Status column with its age.
-
-Everything on the settings row defaults to what Design.pdf asks for; changing
-it takes effect immediately and is remembered in settings.json.
+Settings changes take effect immediately and are remembered in settings.json.
 """
 from __future__ import annotations
 
 import dataclasses
-import math
 import os
 import sys
 import time
 
 import numpy as np
-import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QMetaObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QKeySequence
+from PySide6.QtCore import QMetaObject, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QCheckBox,
-    QComboBox,
-    QFileDialog,
-    QFormLayout,
-    QGridLayout,
-    QGroupBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
+    QApplication,
     QMainWindow,
-    QMessageBox,
-    QPushButton,
-    QSizePolicy,
     QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from . import __version__, driver
-from .channels import CHANNELS, PAIRS, pair_index
-from .config import (
-    MAX_CSV_INTERVAL_S,
-    MAX_HISTORY_S,
-    MAX_LATE_AFTER_SAMPLES,
-    MAX_SAMPLE_HZ,
-    MIN_CSV_INTERVAL_S,
-    MIN_HISTORY_S,
-    MIN_LATE_AFTER_SAMPLES,
-    MIN_SAMPLE_HZ,
-    Settings,
-    late_preview,
-)
-from .csvlogger import (
-    DailyCsvLogger,
-    estimate_bytes_per_day,
-    format_size_preview,
-    load_recent_history,
-)
+from .channels import CHANNELS
+from .config import Settings
+from .csvlogger import DailyCsvLogger, load_recent_history
 from .daq import DaqWorker
-from .history import RAW_SPAN_S, SUMMARY_BUCKET_S, History, minmax_decimate, redraw_interval_s
-from .link import DOT_COLORS, LinkMonitor, LinkState
-from .model import GaugeStatus, Sample
-from .theme import CHANNEL_COLORS, DARK_THEME, LIGHT_THEME, TIME_SPANS
-
-# ---------------------------------------------------------------------------
-pg.setConfigOptions(antialias=True)
-
-COL_IG_PLOT, COL_CG_PLOT, COL_LOC = 0, 1, 2
-COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS = 3, 4, 5
-COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS = 6, 7, 8
-NUM_PAIRS = len(PAIRS)
-
-
-def _dot_style(color: str) -> str:
-    return f"color: {color}; font-size: 18px;"
-
-
-class TorrAxis(pg.AxisItem):
-    """Log Y axis that labels ticks 1E-06 instead of 0.000001."""
-
-    def logTickStrings(self, values, scale, spacing):
-        out = []
-        for v in values:
-            p = 10.0 ** v
-            if p == 0:
-                out.append("0")
-            else:
-                out.append(f"{p:.0E}".replace("E-0", "E-").replace("E+0", "E+"))
-        return out
-
-ROW_FAULT_BG = QColor(LIGHT_THEME["fault_bg"])
-ROW_RANGE_BG = QColor(LIGHT_THEME["range_bg"])
-ROW_APPROX_BG = QColor(LIGHT_THEME["approx_bg"])
-
-
-class CompactSpin(QWidget):
-    """Textbox flanked by − / + buttons for integer or float values.
-
-    Clicking the buttons steps the value.  The textbox is also directly
-    editable: focusing it strips the suffix so you can type a plain number,
-    then pressing Enter or clicking away commits and reformats the value.
-
-    Args:
-        min_val, max_val: inclusive range.
-        value: initial value.
-        step: how much each button press changes the value (default 1).
-        decimals: decimal places to display (0 → integer display).
-        suffix: unit text appended to the displayed value (e.g. " Hz", "%").
-    """
-    valueChanged = Signal(object)   # int when decimals=0, float otherwise
-
-    def __init__(self, min_val, max_val, value, *, step=1, decimals=0,
-                 suffix="", parent=None):
-        super().__init__(parent)
-        self._min = float(min_val)
-        self._max = float(max_val)
-        self._value = float(value)
-        self._step = float(step)
-        self._decimals = decimals
-        self._suffix = suffix
-
-        # Fixed-width only — height floats so the layout makes all three
-        # children (btn, textbox, btn) exactly the same height.
-        _btn_css = "QPushButton { padding: 2px; font-size: 15px; font-weight: bold; }"
-        btn_m = QPushButton("−")
-        btn_m.setFixedWidth(26)
-        btn_m.setStyleSheet(_btn_css)
-        btn_m.clicked.connect(self._decrement)
-
-        txt_w = max(35, len(self._format(self._max)) * 9 + 8)
-        self._txt = QLineEdit(self._format(self._value))
-        self._txt.setAlignment(Qt.AlignCenter)
-        self._txt.setFixedWidth(txt_w)
-        self._txt.installEventFilter(self)
-        self._txt.editingFinished.connect(self._on_edit)
-
-        btn_p = QPushButton("+")
-        btn_p.setFixedWidth(26)
-        btn_p.setStyleSheet(_btn_css)
-        btn_p.clicked.connect(self._increment)
-
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(2)
-        lay.addWidget(btn_m)
-        lay.addWidget(self._txt)
-        lay.addWidget(btn_p)
-
-    # Strip the suffix when the user focuses the textbox so they can type
-    # a plain number without fighting the unit text.
-    def eventFilter(self, obj, event) -> bool:
-        if obj is self._txt and event.type() == QEvent.Type.FocusIn:
-            QTimer.singleShot(0, self._prepare_for_edit)
-        return super().eventFilter(obj, event)
-
-    def _prepare_for_edit(self) -> None:
-        self._txt.setText(self._format_plain(self._value))
-        self._txt.selectAll()
-
-    def _on_edit(self) -> None:
-        text = self._txt.text().replace(self._suffix, "").strip()
-        try:
-            v = float(text)
-        except ValueError:
-            pass
-        else:
-            self.setValue(v)
-        # Always restore the formatted display (with suffix).
-        self._txt.setText(self._format(self._value))
-
-    def _format(self, v: float) -> str:
-        if self._decimals > 0:
-            return f"{v:.{self._decimals}f}{self._suffix}"
-        return f"{round(v)}{self._suffix}"
-
-    def _format_plain(self, v: float) -> str:
-        if self._decimals > 0:
-            return f"{v:.{self._decimals}f}"
-        return str(round(v))
-
-    def minimum(self):
-        return self._min
-
-    def maximum(self):
-        return self._max
-
-    def value(self):
-        if self._decimals > 0:
-            return round(self._value, self._decimals)
-        return round(self._value)
-
-    def setValue(self, v) -> None:
-        v = max(self._min, min(self._max, float(v)))
-        if abs(v - self._value) > 1e-9:
-            self._value = v
-            self._txt.setText(self._format(v))
-            self.valueChanged.emit(self.value())
-
-    def _increment(self) -> None:
-        self.setValue(self._value + self._step)
-
-    def _decrement(self) -> None:
-        self.setValue(self._value - self._step)
+from .history import History
+from .link import LinkMonitor, LinkState
+from .model import Sample
+from .theme import DARK_THEME, LIGHT_THEME
+from .ui.plot_panel import PlotPanel
+from .ui.settings_panel import SettingsPanel
+from .ui.table_panel import TablePanel
+from .ui.topbar import TopBar
 
 
 class MainWindow(QMainWindow):
@@ -239,8 +60,6 @@ class MainWindow(QMainWindow):
         self.settings = settings
         self.history = History(len(CHANNELS))
         self._chan_index = {c.ain: i for i, c in enumerate(CHANNELS)}
-        self._last_redraw = -math.inf            # window clock of the last plot redraw
-        self.curves: dict[int, pg.PlotDataItem] = {}
         self.logger = DailyCsvLogger(settings.csv_dir, settings.csv_include_voltages)
         self._last_csv = 0.0
         self._now = time.time                   # the clock; tests replace it
@@ -258,690 +77,144 @@ class MainWindow(QMainWindow):
         self.resize(1500, 880)
 
         self._build_ui()
-        self._load_settings_into_widgets()
+        self._load_settings_into_panels()
         self._building = False
 
         self._reload_history_from_csv()
         self._start_worker()
 
         # Ages the status line and the STALE table even when no event arrives.
-        self._link_timer = QTimer(self)
+        self._link_timer = QTimer(self, interval=500)
         self._link_timer.timeout.connect(self._render_link)
-        self._link_timer.start(500)
+        self._link_timer.start()
         self._render_link()
 
-    # =====================================================================
-    # UI construction
-    # =====================================================================
     def _build_ui(self) -> None:
+        self.topbar = TopBar()
+        self.plot_panel = PlotPanel()
+        self.table_panel = TablePanel()
+        self.settings_panel = SettingsPanel()
+
         central = QWidget()
         root = QVBoxLayout(central)
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(6)
-
-        root.addLayout(self._build_topbar())
-
+        root.addWidget(self.topbar)
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._build_plot_panel())
-        splitter.addWidget(self._build_table_panel())
+        splitter.addWidget(self.plot_panel)
+        splitter.addWidget(self.table_panel)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setSizes([1000, 500])
         root.addWidget(splitter, 1)
-
-        root.addWidget(self._build_settings_panel())
+        root.addWidget(self.settings_panel)
         self.setCentralWidget(central)
+
+        self.topbar.connect_clicked.connect(self._toggle_connection)
+        self.topbar.install_clicked.connect(self._install_driver)
+        self.topbar.open_log_clicked.connect(
+            lambda: self.topbar.open_folder(self.settings.csv_dir))
+        self.topbar.chk_sim.toggled.connect(self._on_widget_changed)
+        self.topbar.chk_dark.toggled.connect(self._on_dark_toggled)
+        self.plot_panel.span_changed.connect(self._on_widget_changed)
+        self.plot_panel.clear_requested.connect(self._clear_history)
+        self.table_panel.plotted_changed.connect(self._on_plotted_changed)
+        self.settings_panel.changed.connect(self._on_widget_changed)
 
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence.Quit)
         quit_action.triggered.connect(self.close)
         self.addAction(quit_action)
 
-    # -- top bar -----------------------------------------------------------
-    def _build_topbar(self) -> QHBoxLayout:
-        bar = QHBoxLayout()
-
-        self.btn_connect = QPushButton("Connect")
-        self.btn_connect.setFixedWidth(110)
-        self.btn_connect.clicked.connect(self._toggle_connection)
-        bar.addWidget(self.btn_connect)
-
-        self.chk_sim = QCheckBox("Simulation mode")
-        self.chk_sim.setToolTip("Generate fake gauge data so the program can be "
-                                "used with no LabJack attached.")
-        self.chk_sim.toggled.connect(self._on_widget_changed)
-        bar.addWidget(self.chk_sim)
-
-        self.chk_dark = QCheckBox("Dark mode")
-        self.chk_dark.toggled.connect(self._on_dark_toggled)
-        bar.addWidget(self.chk_dark)
-
-        self.lbl_link = QLabel("\u25cf")
-        self.lbl_link.setStyleSheet(_dot_style(DOT_COLORS[LinkState.IDLE]))
-        self.lbl_link.setFixedWidth(16)
-        bar.addWidget(self.lbl_link)
-
-        self.lbl_status = QLabel("")
-        self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        bar.addWidget(self.lbl_status, 1)
-
-        self.btn_install = QPushButton("Install driver")
-        self.btn_install.setToolTip("Install the LabJack LJM driver that "
-                                    "ships in this folder.")
-        self.btn_install.clicked.connect(self._install_driver)
-        self.btn_install.hide()
-        bar.addWidget(self.btn_install)
-
-        self.lbl_csv = QLabel("CSV: off")
-        bar.addWidget(self.lbl_csv)
-
-        btn_open = QPushButton("Open log folder")
-        btn_open.clicked.connect(self._open_log_folder)
-        bar.addWidget(btn_open)
-        return bar
-
-    # -- table -------------------------------------------------------------
-    def _build_table_panel(self) -> QWidget:
-        panel = QWidget()
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(0, 0, 0, 0)
-
-        header = QLabel("Live pressures")
-        f = header.font()
-        f.setBold(True)
-        header.setFont(f)
-        lay.addWidget(header)
-
-        self.table = QTableWidget(NUM_PAIRS, 9)
-        self.table.setHorizontalHeaderLabels([
-            "IG", "CG", "Location",
-            "IG Pressure", "IG Volts", "IG Status",
-            "CG Pressure", "CG Volts", "CG Status",
-        ])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.table.setAlternatingRowColors(True)
-
-        mono = QFont("Consolas")
-        mono.setStyleHint(QFont.Monospace)
-
-        mono_big_bold = QFont("Consolas", 12)
-        mono_big_bold.setStyleHint(QFont.Monospace)
-        mono_big_bold.setBold(True)
-
-        for pair in range(NUM_PAIRS):
-            ig_ch, cg_ch = PAIRS[pair]
-
-            ig_chk = QTableWidgetItem()
-            ig_chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            ig_chk.setCheckState(Qt.Unchecked)
-            ig_chk.setBackground(QColor(CHANNEL_COLORS[ig_ch.ain]))
-            self.table.setItem(pair, COL_IG_PLOT, ig_chk)
-
-            cg_chk = QTableWidgetItem()
-            cg_chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            cg_chk.setCheckState(Qt.Unchecked)
-            cg_chk.setBackground(QColor(CHANNEL_COLORS[cg_ch.ain]))
-            self.table.setItem(pair, COL_CG_PLOT, cg_chk)
-
-            self.table.setItem(pair, COL_LOC, QTableWidgetItem(ig_ch.location))
-
-            for col in (COL_IG_VOLTS, COL_CG_VOLTS):
-                item = QTableWidgetItem("---")
-                item.setFont(mono)
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.table.setItem(pair, col, item)
-
-            for col in (COL_IG_PRESS, COL_CG_PRESS):
-                item = QTableWidgetItem("---")
-                item.setFont(mono_big_bold)
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.table.setItem(pair, col, item)
-
-            self.table.setItem(pair, COL_IG_STATUS, QTableWidgetItem(""))
-            self.table.setItem(pair, COL_CG_STATUS, QTableWidgetItem(""))
-
-        hh = self.table.horizontalHeader()
-        for col in (COL_IG_PLOT, COL_CG_PLOT):
-            hh.setSectionResizeMode(col, QHeaderView.Fixed)
-            self.table.setColumnWidth(col, 42)
-        for col in (COL_LOC, COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS,
-                    COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS):
-            hh.setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        self.table.itemChanged.connect(self._on_table_item_changed)
-        lay.addWidget(self.table, 1)
-
-        row = QHBoxLayout()
-        for text, fn in (
-            ("Plot all", lambda: self._set_plotted(lambda c: True)),
-            ("Plot none", lambda: self._set_plotted(lambda c: False)),
-            ("Ion only", lambda: self._set_plotted(lambda c: c.is_ion)),
-            ("Convectron only", lambda: self._set_plotted(lambda c: not c.is_ion)),
-        ):
-            b = QPushButton(text)
-            b.clicked.connect(fn)
-            row.addWidget(b)
-        row.addStretch(1)
-        lay.addLayout(row)
-        return panel
-
-    # -- plot --------------------------------------------------------------
-    def _build_plot_panel(self) -> QWidget:
-        panel = QWidget()
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(0, 0, 0, 0)
-
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("Time span:"))
-        self.cmb_span = QComboBox()
-        for label, secs in TIME_SPANS:
-            self.cmb_span.addItem(label, secs)
-        self.cmb_span.currentIndexChanged.connect(self._on_widget_changed)
-        controls.addWidget(self.cmb_span)
-
-        self.chk_autoy = QCheckBox("Auto Y")
-        self.chk_autoy.setChecked(True)
-        self.chk_autoy.toggled.connect(self._apply_y_mode)
-        controls.addWidget(self.chk_autoy)
-
-        controls.addWidget(QLabel("Y from 1e"))
-        self.spn_ymin = CompactSpin(-12, 4, -9)
-        self.spn_ymin.valueChanged.connect(self._apply_y_mode)
-        controls.addWidget(self.spn_ymin)
-        controls.addWidget(QLabel("to 1e"))
-        self.spn_ymax = CompactSpin(-11, 5, 3)
-        self.spn_ymax.valueChanged.connect(self._apply_y_mode)
-        controls.addWidget(self.spn_ymax)
-
-        btn_clear = QPushButton("Clear history")
-        btn_clear.clicked.connect(self._clear_history)
-        controls.addWidget(btn_clear)
-        controls.addStretch(1)
-        lay.addLayout(controls)
-
-        self.plot = pg.PlotWidget(axisItems={
-            "bottom": pg.DateAxisItem(orientation="bottom"),
-            "left": TorrAxis(orientation="left"),
-            "right": TorrAxis(orientation="right"),
-        })
-        self.plot.setLabel("left", "Pressure [Torr]")
-        self.plot.showAxis("right")
-        self.plot.getAxis("right").setStyle(showValues=True)
-        self.plot.getAxis("right").enableAutoSIPrefix(False)
-        # pyqtgraph would otherwise "helpfully" rescale Torr to mTorr.
-        self.plot.getAxis("left").enableAutoSIPrefix(False)
-        self.plot.getAxis("bottom").enableAutoSIPrefix(False)
-        self.plot.setLogMode(x=False, y=True)
-        t = DARK_THEME if self.settings.dark_mode else LIGHT_THEME
-        self.legend = self.plot.addLegend(offset=(8, 8), labelTextSize="8pt",
-                                          brush=pg.mkBrush(*t["legend_brush"]),
-                                          pen=pg.mkPen(t["legend_pen"]))
-        self.legend.setVisible(self.settings.show_legend)
-        self.lbl_plot_note = QLabel(
-            f"Older than {RAW_SPAN_S // 3600} h: min/max per {SUMMARY_BUCKET_S} s")
-        self.lbl_plot_note.setToolTip(
-            "Only the most recent hour is kept sample by sample; older data is "
-            "summarised as the lowest and highest reading of each 10 s, so spikes still show.")
-        self.lbl_plot_note.setVisible(False)
-        lay.addWidget(self.lbl_plot_note)
-        lay.addWidget(self.plot, 1)
-
-        for ch in CHANNELS:
-            curve = self.plot.plot([], [], pen=pg.mkPen("w"), connect="finite")
-            curve.setVisible(False)
-            self.curves[ch.ain] = curve
-
-        self._apply_grid()
-        self._apply_curve_appearance()
-        self._apply_y_mode()
-        return panel
-
-    def _rebuild_legend(self) -> None:
-        """Only list the channels actually being plotted, so 14 entries do not
-        cover the graph when you are watching two of them."""
-        self.legend.clear()
-        for ch in CHANNELS:
-            curve = self.curves[ch.ain]
-            if curve.isVisible():
-                self.legend.addItem(curve, ch.name)
-
-    # -- settings ----------------------------------------------------------
-    def _build_settings_panel(self) -> QWidget:
-        box = QGroupBox("Settings")
-        box.setCheckable(True)
-        box.setChecked(False)
-        outer = QVBoxLayout(box)
-        outer.setContentsMargins(6, 2, 6, 4)
-        inner = QWidget()
-        outer.addWidget(inner)
-        # Unchecking the group box should give the space back to the plot,
-        # not just grey the controls out.
-        box.toggled.connect(inner.setVisible)
-        inner.setVisible(False)
-        grid = QGridLayout(inner)
-        grid.setContentsMargins(4, 4, 4, 4)
-
-        def add(col: int, title: str) -> QFormLayout:
-            g = QGroupBox(title)
-            form = QFormLayout(g)
-            form.setContentsMargins(8, 6, 8, 6)
-            grid.addWidget(g, 0, col)
-            return form
-
-        # --- LabJack ---
-        f = add(0, "LabJack T7")
-        self.cmb_conn = QComboBox()
-        self.cmb_conn.addItems(["USB", "ETHERNET", "ANY"])
-        self.cmb_conn.currentIndexChanged.connect(self._on_widget_changed)
-        f.addRow("Connection:", self.cmb_conn)
-
-        self.txt_ident = QLineEdit()
-        self.txt_ident.setToolTip("Serial number or IP address. ANY = first T7 found.")
-        self.txt_ident.editingFinished.connect(self._on_widget_changed)
-        f.addRow("Identifier:", self.txt_ident)
-
-        self.spn_res = CompactSpin(0, 12, 0)
-        self.spn_res.setToolTip("T7 ADC resolution index. Higher = quieter but slower. "
-                                "0 uses the device default.")
-        self.spn_res.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Resolution index:", self.spn_res)
-
-        # --- Acquisition ---
-        f = add(1, "Acquisition")
-        self.spn_hz = CompactSpin(MIN_SAMPLE_HZ, MAX_SAMPLE_HZ, 1.0, step=0.5, decimals=2, suffix=" Hz")
-        self.spn_hz.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Update rate:", self.spn_hz)
-
-        self.spn_late = CompactSpin(MIN_LATE_AFTER_SAMPLES, MAX_LATE_AFTER_SAMPLES, 3,
-                                    suffix=" samples")
-        tip = ("The status turns amber (Late) and the table shows STALE "
-               "when this many samples in a row are missing.")
-        self.spn_late.setToolTip(tip)
-        self.spn_late.valueChanged.connect(self._on_widget_changed)
-        self.lbl_late_preview = QLabel()
-        self.lbl_late_preview.setToolTip(tip)
-        late_row = QHBoxLayout()
-        late_row.addWidget(self.spn_late)
-        late_row.addWidget(self.lbl_late_preview, 1)
-        late_wrap = QWidget()
-        late_wrap.setLayout(late_row)
-        f.addRow("Late after:", late_wrap)
-
-        self.spn_fault = CompactSpin(1.0, 12.0, 10.0, step=0.1, decimals=2, suffix=" V")
-        self.spn_fault.setToolTip(
-            "Above this the channel reads Gauge Fault.\n"
-            "The VGC083A drives its output past +11 V on a fault, but a T7 "
-            "analog input saturates just past 10 V, so 10 V is the practical "
-            "trip point. Normal output never exceeds 9 V (ion) or 5.66 V "
-            "(Convectron)."
-        )
-        self.spn_fault.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Gauge fault above:", self.spn_fault)
-
-        self.spn_hist = CompactSpin(MIN_HISTORY_S // 3600, MAX_HISTORY_S // 3600, 24, suffix=" hr")
-        self.spn_hist.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Keep history:", self.spn_hist)
-
-        # --- CSV ---
-        f = add(2, "CSV logging")
-        self.chk_csv = QCheckBox("Enabled  (one file per day, named by date)")
-        self.chk_csv.toggled.connect(self._on_widget_changed)
-        f.addRow(self.chk_csv)
-
-        self.spn_csv = CompactSpin(MIN_CSV_INTERVAL_S, MAX_CSV_INTERVAL_S, 10.0, step=1.0, decimals=1, suffix=" s")
-        self.spn_csv.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Write every:", self.spn_csv)
-
-        self.lbl_csv_size = QLabel()
-        self.lbl_csv_size.setToolTip("Estimated size of one day's file at this interval.")
-        f.addRow(self.lbl_csv_size)
-
-        folder_row = QHBoxLayout()
-        self.txt_csvdir = QLineEdit()
-        self.txt_csvdir.editingFinished.connect(self._on_widget_changed)
-        folder_row.addWidget(self.txt_csvdir, 1)
-        btn_browse = QPushButton("...")
-        btn_browse.setFixedWidth(30)
-        btn_browse.clicked.connect(self._browse_csv_dir)
-        folder_row.addWidget(btn_browse)
-        wrap = QWidget()
-        wrap.setLayout(folder_row)
-        f.addRow("Folder:", wrap)
-
-        self.chk_csvv = QCheckBox("Also record raw volts")
-        self.chk_csvv.toggled.connect(self._on_widget_changed)
-        f.addRow(self.chk_csvv)
-
-        # --- Plot appearance ---
-        f = add(3, "Plot")
-        self.chk_legend = QCheckBox("Show legend on plot")
-        self.chk_legend.toggled.connect(self._on_widget_changed)
-        f.addRow(self.chk_legend)
-
-        self.spn_curve_width = CompactSpin(0.5, 10.0, 1.0, step=0.5, decimals=1, suffix=" px")
-        self.spn_curve_width.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Line width:", self.spn_curve_width)
-
-        self.spn_curve_alpha = CompactSpin(0, 100, 31, suffix="%")
-        self.spn_curve_alpha.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Line opacity:", self.spn_curve_alpha)
-
-        self.chk_show_grid = QCheckBox("Show background grid")
-        self.chk_show_grid.toggled.connect(self._on_widget_changed)
-        f.addRow(self.chk_show_grid)
-
-        self.spn_grid_alpha = CompactSpin(0, 100, 30, suffix="%")
-        self.spn_grid_alpha.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Grid opacity:", self.spn_grid_alpha)
-
-        # --- Table appearance ---
-        f = add(4, "Table")
-        self.spn_table_font = CompactSpin(6, 72, 12, suffix=" pt")
-        self.spn_table_font.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Pressure font:", self.spn_table_font)
-
-        self.spn_loc_font = CompactSpin(6, 72, 10, suffix=" pt")
-        self.spn_loc_font.valueChanged.connect(self._on_widget_changed)
-        f.addRow("Location font:", self.spn_loc_font)
-
-        self.col_chk: dict[int, QCheckBox] = {}
-        for col, name in (
-            (COL_LOC,       "Location"),
-            (COL_IG_PRESS,  "IG Pressure"),
-            (COL_IG_VOLTS,  "IG Volts"),
-            (COL_IG_STATUS, "IG Status"),
-            (COL_CG_PRESS,  "CG Pressure"),
-            (COL_CG_VOLTS,  "CG Volts"),
-            (COL_CG_STATUS, "CG Status"),
-        ):
-            chk = QCheckBox(name)
-            chk.toggled.connect(self._on_widget_changed)
-            f.addRow(chk)
-            self.col_chk[col] = chk
-
-        grid.setColumnStretch(5, 1)
-        return box
-
-    # =====================================================================
-    # Settings <-> widgets
-    # =====================================================================
-    def _load_settings_into_widgets(self) -> None:
+    # -- Settings <-> panels
+    def _load_settings_into_panels(self) -> None:
         s = self.settings
-        self.chk_sim.setChecked(s.simulate)
-        self.chk_dark.setChecked(s.dark_mode)
+        self.topbar.chk_sim.setChecked(s.simulate)
+        self.topbar.chk_dark.setChecked(s.dark_mode)
         self._apply_theme()
-        self.cmb_conn.setCurrentText(s.connection)
-        self.txt_ident.setText(s.identifier)
-        self.spn_res.setValue(int(s.resolution_index))
-        self.spn_hz.setValue(float(s.sample_hz))
-        self.spn_fault.setValue(float(s.fault_volts))
-        self.spn_late.setValue(int(s.late_after_samples))
-        self.spn_hist.setValue(max(1, round(s.history_s / 3600)))
-        self.chk_csv.setChecked(s.csv_enabled)
-        self.spn_csv.setValue(float(s.csv_interval_s))
-        self.txt_csvdir.setText(s.csv_dir)
-        self.chk_csvv.setChecked(s.csv_include_voltages)
-        self.chk_legend.setChecked(s.show_legend)
-        self.spn_curve_width.setValue(s.curve_width)
-        self.spn_curve_alpha.setValue(s.curve_alpha)
-        self.chk_show_grid.setChecked(s.show_grid)
-        self.spn_grid_alpha.setValue(s.grid_alpha)
-        self.spn_table_font.setValue(s.table_font_size)
-        self.spn_loc_font.setValue(s.loc_font_size)
-        visible = set(s.table_visible_cols)
-        for col, chk in self.col_chk.items():
-            chk.setChecked(col in visible)
-        self._apply_table_appearance()
-        self._apply_curve_appearance()
-        self._apply_grid()
+        self.settings_panel.load(s)
+        self.plot_panel.set_span(s.plot_window_s)
+        self.table_panel.load_plotted(s.plotted_ains)
+        self.plot_panel.set_plotted(s.plotted_ains)
+        self._apply_appearance()
 
-        idx = max(0, next((i for i, (_, sec) in enumerate(TIME_SPANS)
-                           if sec >= s.plot_window_s), 1))
-        self.cmb_span.setCurrentIndex(idx)
-
-        wanted = set(s.plotted_ains)
-        for pair in range(NUM_PAIRS):
-            ig_ain, cg_ain = (c.ain for c in PAIRS[pair])
-            self.table.item(pair, COL_IG_PLOT).setCheckState(
-                Qt.Checked if ig_ain in wanted else Qt.Unchecked)
-            self.table.item(pair, COL_CG_PLOT).setCheckState(
-                Qt.Checked if cg_ain in wanted else Qt.Unchecked)
-            self.curves[ig_ain].setVisible(ig_ain in wanted)
-            self.curves[cg_ain].setVisible(cg_ain in wanted)
-        self._rebuild_legend()
-        self._update_previews(s)
-
-    def _harvest_widgets(self) -> Settings:
+    def _harvest_panels(self) -> Settings:
         s = self.settings
-        s.simulate = self.chk_sim.isChecked()
-        s.connection = self.cmb_conn.currentText()
-        s.identifier = self.txt_ident.text().strip() or "ANY"
-        s.resolution_index = self.spn_res.value()
-        s.sample_hz = self.spn_hz.value()
-        s.fault_volts = self.spn_fault.value()
-        s.late_after_samples = self.spn_late.value()
-        s.history_s = self.spn_hist.value() * 3600
-        s.csv_enabled = self.chk_csv.isChecked()
-        s.csv_interval_s = self.spn_csv.value()
-        s.csv_dir = self.txt_csvdir.text().strip() or s.csv_dir
-        s.csv_include_voltages = self.chk_csvv.isChecked()
-        s.show_legend = self.chk_legend.isChecked()
-        s.curve_width = self.spn_curve_width.value()
-        s.curve_alpha = self.spn_curve_alpha.value()
-        s.show_grid = self.chk_show_grid.isChecked()
-        s.grid_alpha = self.spn_grid_alpha.value()
-        s.table_font_size = self.spn_table_font.value()
-        s.loc_font_size = self.spn_loc_font.value()
-        s.table_visible_cols = [col for col, chk in self.col_chk.items() if chk.isChecked()]
-        s.plot_window_s = int(self.cmb_span.currentData())
-        s.plotted_ains = [
-            ain
-            for pair in range(NUM_PAIRS)
-            for col, ain in ((COL_IG_PLOT, PAIRS[pair][0].ain), (COL_CG_PLOT, PAIRS[pair][1].ain))
-            if self.table.item(pair, col).checkState() == Qt.Checked
-        ]
+        s.simulate = self.topbar.chk_sim.isChecked()
+        self.settings_panel.harvest(s)
+        s.plot_window_s = self.plot_panel.span_s()
+        s.plotted_ains = self.table_panel.plotted_ains()
         return s
 
-    def _update_previews(self, s: Settings) -> None:
-        self.lbl_late_preview.setText(late_preview(s.late_after_samples, s.sample_hz))
-        rows = math.ceil(86400 / s.csv_interval_s)
-        self.lbl_csv_size.setText(format_size_preview(
-            estimate_bytes_per_day(s.csv_interval_s, s.csv_include_voltages), rows))
+    def _apply_appearance(self) -> None:
+        self.table_panel.apply_appearance(self.settings)
+        self.plot_panel.apply_appearance(self.settings)
+
+    def _save_settings(self) -> None:
+        self._settings_problem = self.settings.save()
+        if self._settings_problem:
+            print(self._settings_problem, file=sys.stderr)
 
     def _on_widget_changed(self, *_args) -> None:
         if self._building:
             return
-        s = self._harvest_widgets()
-        self._update_previews(s)
-        self._settings_problem = s.save()
-        if self._settings_problem:
-            print(self._settings_problem, file=sys.stderr)
+        s = self._harvest_panels()
+        self.settings_panel.update_previews(s)
+        self._save_settings()
         self.link.configure(s.late_after_samples, s.sample_hz)
         self._render_link()
         self.logger.reconfigure(s.csv_dir, s.csv_include_voltages)
-        self.legend.setVisible(s.show_legend)
-        self._apply_table_appearance()
-        self._apply_curve_appearance()
-        self._apply_grid()
+        self._apply_appearance()
         self.settings_changed.emit(dataclasses.replace(s))
         self._redraw_plot()
 
-    def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
-        if self._building or item.column() not in (COL_IG_PLOT, COL_CG_PLOT):
+    def _on_plotted_changed(self) -> None:
+        if self._building:
             return
-        pair = item.row()
-        ain = PAIRS[pair][0 if item.column() == COL_IG_PLOT else 1].ain
-        is_plotting = item.checkState() == Qt.Checked
-        self.curves[ain].setVisible(is_plotting)
-        self._rebuild_legend()
+        self.plot_panel.set_plotted(self.table_panel.plotted_ains())
         self._on_widget_changed()
 
     def _on_dark_toggled(self, checked: bool) -> None:
         if self._building:
             return
         self.settings.dark_mode = checked
-        self._settings_problem = self.settings.save()
-        if self._settings_problem:
-            print(self._settings_problem, file=sys.stderr)
+        self._save_settings()
         self._apply_theme()
         self._render_link()
 
     def _apply_theme(self) -> None:
-        global ROW_FAULT_BG, ROW_RANGE_BG, ROW_APPROX_BG
         theme = DARK_THEME if self.settings.dark_mode else LIGHT_THEME
-        ROW_FAULT_BG = QColor(theme["fault_bg"])
-        ROW_RANGE_BG = QColor(theme["range_bg"])
-        ROW_APPROX_BG = QColor(theme["approx_bg"])
-
-        from PySide6.QtWidgets import QApplication
         QApplication.instance().setStyleSheet(theme["stylesheet"])
+        self.table_panel.apply_theme(theme)
+        self.plot_panel.apply_theme(theme)
 
-        self.plot.setBackground(theme["pg_bg"])
-        for axis_name in ("left", "bottom", "right"):
-            axis = self.plot.getAxis(axis_name)
-            axis.setPen(theme["pg_fg"])
-            axis.setTextPen(theme["pg_fg"])
-        self.plot.getAxis("left").setLabel("Pressure [Torr]",
-                                           color=theme["pg_fg"])
-
-        self.legend.setBrush(pg.mkBrush(*theme["legend_brush"]))
-        self.legend.setPen(pg.mkPen(theme["legend_pen"]))
-        for item in self.legend.items:
-            for single in item:
-                if isinstance(single, pg.graphicsItems.LabelItem.LabelItem):
-                    single.setText(single.text, color=theme["pg_fg"])
-
-    def _set_plotted(self, predicate) -> None:
-        self._building = True
-        for pair in range(NUM_PAIRS):
-            ig_ch, cg_ch = PAIRS[pair]
-            ig_on = bool(predicate(ig_ch))
-            cg_on = bool(predicate(cg_ch))
-            self.table.item(pair, COL_IG_PLOT).setCheckState(
-                Qt.Checked if ig_on else Qt.Unchecked)
-            self.table.item(pair, COL_CG_PLOT).setCheckState(
-                Qt.Checked if cg_on else Qt.Unchecked)
-            self.curves[ig_ch.ain].setVisible(ig_on)
-            self.curves[cg_ch.ain].setVisible(cg_on)
-        self._building = False
-        self._rebuild_legend()
-        self._on_widget_changed()
-
-    def _apply_curve_appearance(self) -> None:
-        alpha = int(self.settings.curve_alpha / 100 * 255)
-        width = self.settings.curve_width
-        for ch in CHANNELS:
-            color = pg.mkColor(CHANNEL_COLORS[ch.ain])
-            pen = pg.mkPen((color.red(), color.green(), color.blue(), alpha), width=width)
-            self.curves[ch.ain].setPen(pen)
-
-    def _apply_grid(self) -> None:
-        alpha = self.settings.grid_alpha / 100
-        self.plot.showGrid(x=self.settings.show_grid, y=self.settings.show_grid, alpha=alpha)
-
-    def _apply_table_appearance(self) -> None:
-        size = self.settings.table_font_size
-        font = QFont("Consolas", size)
-        font.setStyleHint(QFont.Monospace)
-        font.setBold(True)
-        loc_font = QFont("Consolas", self.settings.loc_font_size)
-        loc_font.setStyleHint(QFont.Monospace)
-        for pair in range(NUM_PAIRS):
-            for col in (COL_IG_PRESS, COL_CG_PRESS):
-                item = self.table.item(pair, col)
-                if item:
-                    item.setFont(font)
-            item = self.table.item(pair, COL_LOC)
-            if item:
-                item.setFont(loc_font)
-        row_h = max(22, int(size * 2.4))
-        self.table.verticalHeader().setDefaultSectionSize(row_h)
-        chk_w = max(22, row_h)
-        for col in (COL_IG_PLOT, COL_CG_PLOT):
-            self.table.setColumnWidth(col, chk_w)
-        visible = set(self.settings.table_visible_cols)
-        for col in (COL_LOC, COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS,
-                    COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS):
-            self.table.setColumnHidden(col, col not in visible)
-
-    def _browse_csv_dir(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Choose the CSV log folder",
-                                             self.txt_csvdir.text())
-        if d:
-            self.txt_csvdir.setText(d)
-            self._on_widget_changed()
-
-    def _open_log_folder(self) -> None:
-        path = self.settings.csv_dir
-        try:
-            os.makedirs(path, exist_ok=True)
-            os.startfile(path)  # type: ignore[attr-defined]  (Windows)
-        except Exception:  # noqa: BLE001 - any failure is reported or handled here
-            QMessageBox.information(self, "Log folder", path)
-
-    # =====================================================================
-    # LabJack driver: check on startup, offer a one-click install
-    # =====================================================================
+    # -- LabJack driver: check on startup, offer a one-click install
     def _refresh_driver_state(self) -> None:
         """Tell the user plainly if the LJM driver is missing, and show the
         Install button when we shipped an installer.  Simulation mode never
         needs the driver, so we stay quiet there."""
+        ok, msg = (True, "") if self.settings.simulate else driver.check_ljm()
+        installer = not ok and bool(driver.find_installer())
+        self.topbar.btn_install.setVisible(installer)
         self._driver_msg = ""
-        if self.settings.simulate:
-            self.btn_install.hide()
-            return
-
-        ok, msg = driver.check_ljm()
-        if ok:
-            self.btn_install.hide()
-            return
-
-        if driver.find_installer():
-            self.btn_install.show()
-            self._driver_msg = (msg + " - click 'Install driver', or tick "
-                                "Simulation mode.")
-        else:
-            self.btn_install.hide()
-            self._driver_msg = (msg + " - install the LJM software from "
-                                "labjack.com, or tick Simulation mode.")
+        if not ok:
+            self._driver_msg = msg + (
+                " - click 'Install driver', or tick Simulation mode." if installer else
+                " - install the LJM software from labjack.com, or tick Simulation mode.")
 
     def _install_driver(self) -> None:
-        path = driver.find_installer()
-        if not path:
-            QMessageBox.information(
-                self, "Install driver",
-                "No LabJack installer was bundled with this program.\n\n"
-                "Download and run the LJM software installer from labjack.com.")
-            return
-
-        if QMessageBox.question(
-                self, "Install LabJack driver",
-                "This will launch the LabJack LJM installer.\n\n"
-                "Windows will ask for administrator permission.  When it "
-                "finishes, close and reopen IBL Pressure so it can find the "
-                "driver.\n\nContinue?") != QMessageBox.Yes:
-            return
-
-        if driver.launch_installer(path):
+        if self.topbar.run_installer():
             self._driver_msg = ("LabJack installer launched - finish it, then "
                                 "restart IBL Pressure.")
             self._render_link()
-        else:
-            QMessageBox.warning(
-                self, "Install driver",
-                "Could not launch the installer:\n" + path)
 
-    # =====================================================================
-    # Acquisition thread
-    # =====================================================================
+    # -- Acquisition thread
     def _start_worker(self) -> None:
         self.thread = QThread(self)
         self.worker = DaqWorker(dataclasses.replace(self.settings))
         self.worker.moveToThread(self.thread)
 
-        # Deliberately NOT connected to thread.started: the acquisition
-        # thread just idles until the user presses Connect.
+        # Not connected to thread.started: the thread idles until Connect is pressed.
         self.start_worker.connect(self.worker.start)
         self.worker.sample.connect(self._on_sample)
         self.worker.link_up.connect(self._on_link_up)
@@ -961,13 +234,12 @@ class MainWindow(QMainWindow):
             self._link_wanted = False
             self.link.disconnect_requested(now)
             self.stop_worker.emit()
-            self.btn_connect.setText("Connect")
+            self.topbar.btn_connect.setText("Connect")
         else:
             self._link_wanted = True
             self.link.connect_requested(now)
-            self.btn_connect.setText("Disconnect")
-            # The worker already has the current settings (every widget
-            # change is pushed to it live), so just tell it to open.
+            self.topbar.btn_connect.setText("Disconnect")
+            # The worker already has the current settings; just tell it to open.
             self.start_worker.emit()
         self._render_link()
 
@@ -999,95 +271,35 @@ class MainWindow(QMainWindow):
         """
         now = self._now()
         view = self.link.view(now)
-        self.lbl_link.setStyleSheet(_dot_style(view.dot_color))
-        self.lbl_link.setText("\u25cf")
         text = view.text
         if view.state is LinkState.DOWN and self._driver_msg:
             text = self._driver_msg
         if self._settings_problem:
-            text = f"{self._settings_problem} \u00b7 {text}"
-        self.lbl_status.setText(text)
-        if view.state is not LinkState.LIVE:
-            self._show_stale(now)
+            text = f"{self._settings_problem} · {text}"
+        self.topbar.show_link(view.dot_color, text)
+        if view.state is not LinkState.LIVE and self._last_sample is not None:
+            self.table_panel.show_stale(self._last_sample,
+                                        max(0.0, now - self._last_sample_now))
 
-    def _show_stale(self, now: float) -> None:
-        """Replace every pressure number with STALE; the last value and its age
-        go in that gauge's Status cell."""
-        sample = self._last_sample
-        if sample is None:
-            return
-        age = max(0.0, now - self._last_sample_now)
-        stale_bg = QColor((DARK_THEME if self.settings.dark_mode else LIGHT_THEME)["stale_bg"])
-        by_ain = sample.by_ain()
-        self._building = True
-        for ch in CHANNELS:
-            r = by_ain.get(ch.ain)
-            if r is None:
-                continue
-            pair = pair_index(ch.ain)
-            if ch.is_ion:
-                press_col, volts_col, status_col = COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS
-            else:
-                press_col, volts_col, status_col = COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS
-            self.table.item(pair, press_col).setText("STALE")
-            self.table.item(pair, status_col).setText(f"last {r.display_text()}, {age:.0f} s ago")
-            for col in (press_col, volts_col, status_col):
-                self.table.item(pair, col).setBackground(stale_bg)
-        self._building = False
-
-    # =====================================================================
-    # New data
-    # =====================================================================
+    # -- New data
     def _on_sample(self, sample: Sample) -> None:
         now = self._now()
         self.link.sample(now)
         self._last_sample = sample
         self._last_sample_now = now
-        self._update_table(sample)
-        self._update_series(sample)
+        self.table_panel.show_sample(sample)
+        self.history.append(sample.timestamp, self._pressure_row(sample))
         self._maybe_write_csv(sample)
-        span = int(self.cmb_span.currentData() or 300)
-        if now - self._last_redraw >= redraw_interval_s(
-                span, self.plot.width(), self.settings.sample_hz):
+        if self.plot_panel.redraw_due(now, self.settings.sample_hz):
             self._redraw_plot()
         self._render_link()
 
-    def _update_table(self, sample: Sample) -> None:
-        self._building = True
-        by_ain = sample.by_ain()
-        for ch in CHANNELS:
-            r = by_ain.get(ch.ain)
-            if r is None:
-                continue
-            pair = pair_index(ch.ain)
-            if ch.is_ion:
-                press_col, volts_col, status_col = COL_IG_PRESS, COL_IG_VOLTS, COL_IG_STATUS
-            else:
-                press_col, volts_col, status_col = COL_CG_PRESS, COL_CG_VOLTS, COL_CG_STATUS
-
-            self.table.item(pair, volts_col).setText(f"{r.voltage:8.4f}")
-            # Always show pressure or fault status in the pressure column
-            self.table.item(pair, press_col).setText(r.display_text())
-            self.table.item(pair, status_col).setText("" if r.ok else r.status.value)
-
-            if r.status in (GaugeStatus.FAULT, GaugeStatus.NEGATIVE):
-                bg = ROW_FAULT_BG
-            elif r.status in (GaugeStatus.UNDER, GaugeStatus.OVER):
-                bg = ROW_RANGE_BG
-            elif r.status is GaugeStatus.APPROX:
-                bg = ROW_APPROX_BG
-            else:
-                bg = QColor(Qt.transparent)
-            for col in (press_col, volts_col, status_col):
-                self.table.item(pair, col).setBackground(bg)
-        self._building = False
-
-    def _update_series(self, sample: Sample) -> None:
+    def _pressure_row(self, sample: Sample) -> np.ndarray:
         row = np.full(len(CHANNELS), np.nan)
         for r in sample.readings:
             if r.pressure is not None and r.pressure > 0:
                 row[self._chan_index[r.ain]] = r.pressure
-        self.history.append(sample.timestamp, row)
+        return row
 
     def _reload_history_from_csv(self) -> None:
         """Refill the plot from yesterday's and today's Daily CSVs, once, at startup."""
@@ -1097,11 +309,12 @@ class MainWindow(QMainWindow):
             text = f"History reloaded: {loaded} rows from CSV"
             if skipped:
                 text += f" ({skipped} unreadable lines skipped)"
-            self.lbl_csv.setText(text)
+            self.topbar.lbl_csv.setText(text)
 
     def _maybe_write_csv(self, sample: Sample) -> None:
+        lbl = self.topbar.lbl_csv
         if not self.settings.csv_enabled:
-            self.lbl_csv.setText("CSV: off")
+            lbl.setText("CSV: off")
             return
         if sample.timestamp - self._last_csv < self.settings.csv_interval_s:
             return
@@ -1109,51 +322,19 @@ class MainWindow(QMainWindow):
         if self.logger.write(sample):
             self._csv_rows += 1
             name = os.path.basename(self.logger.current_path)
-            self.lbl_csv.setText(f"CSV: {name}  ({self._csv_rows} rows)")
+            lbl.setText(f"CSV: {name}  ({self._csv_rows} rows)")
         else:
-            self.lbl_csv.setText(self.logger.last_error or "CSV: write failed")
-
-    # =====================================================================
-    # Plot
-    # =====================================================================
-    def _apply_y_mode(self, *_args) -> None:
-        if self.chk_autoy.isChecked():
-            self.plot.enableAutoRange(axis="y")
-        else:
-            lo = min(self.spn_ymin.value(), self.spn_ymax.value() - 1)
-            hi = max(self.spn_ymax.value(), lo + 1)
-            self.plot.disableAutoRange(axis="y")
-            self.plot.setYRange(lo, hi, padding=0)   # log mode: these are exponents
+            lbl.setText(self.logger.last_error or "CSV: write failed")
 
     def _redraw_plot(self) -> None:
-        span = int(self.cmb_span.currentData() or 300)
-        now = self._now()
-        self._last_redraw = now
-        since = now - span
-        self.lbl_plot_note.setVisible(span > RAW_SPAN_S)
-        n_buckets = max(100, self.plot.width())
-        gap_s = self.link.late_threshold_s
-        t1 = math.nextafter(now, math.inf)   # History.window excludes t1; keep a Sample at `now`
-        any_data = False
-        for ch in CHANNELS:
-            curve = self.curves[ch.ain]
-            if not curve.isVisible():
-                continue
-            t, lo, hi = self.history.window(self._chan_index[ch.ain], since, t1)
-            t, p = minmax_decimate(t, lo, hi, since, now, n_buckets, gap_s)
-            if np.isfinite(p).any():
-                any_data = True
-            curve.setData(t, p)
-        if any_data:
-            self.plot.setXRange(since, now, padding=0)
+        self.plot_panel.redraw(self.history, self._now(), self.link.late_threshold_s)
 
     def _clear_history(self) -> None:
         self.history.clear()
         self._redraw_plot()
 
-    # =====================================================================
     def closeEvent(self, event) -> None:
-        problem = self._harvest_widgets().save()
+        problem = self._harvest_panels().save()
         if problem:
             print(problem, file=sys.stderr)  # the window is closing; stderr is all we have
         # Use a blocking call so the worker's stop() (and LJM handle close)
@@ -1162,8 +343,7 @@ class MainWindow(QMainWindow):
         QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
         self.thread.quit()
         self.thread.wait(5000)
-        # Final safety net: close every LJM handle in the process so the
-        # next launch starts with a clean slate (no phantom handles).
+        # Safety net: close every LJM handle so the next launch has no phantom handles.
         self.worker.cleanup()
         self.logger.close()
         super().closeEvent(event)

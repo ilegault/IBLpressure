@@ -127,7 +127,13 @@ src/ibl/
   daq.py         — DaqWorker (separate QThread, auto-reconnects on failure)
   config.py      — Settings dataclass, settings.json load/save
   driver.py      — LJM driver check + one-click installer launch
-  mainwindow.py  — the single PySide6 window
+  mainwindow.py  — the single PySide6 window: wires the panels to worker, link, history, CSV
+  ui/            — the panels, widgets only
+    widgets.py       CompactSpin, TorrAxis
+    topbar.py        TopBar: connect, simulation, dark mode, dot, status, CSV label
+    table_panel.py   TablePanel: the 14-gauge table and plot checkboxes
+    plot_panel.py    PlotPanel: span, Y range, curves, legend, grid, caption
+    settings_panel.py SettingsPanel: load(settings) / harvest(settings)
 tests/           — pytest suite (run `pytest -q`)
 main.py          — entry point (`python main.py`)
 pyproject.toml   — package metadata, pytest and ruff settings
