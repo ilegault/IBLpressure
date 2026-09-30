@@ -7,7 +7,7 @@ AGENTS.md rule 8; spec §2 *In-app help*.
 
 **Blocked by:** 11
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
@@ -42,3 +42,4 @@ Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pyte
 
 ## Comments
 - 2026-09-30: Implemented on a draft PR; ticket stays in-progress until it merges. `mainwindow.py` grew from 349 to 357 lines (`show_help`), over ticket 11's 350-line target.
+- 2026-09-30: PR merged (Merge pull request #12). Marked done.
