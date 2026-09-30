@@ -44,6 +44,7 @@ from .history import History
 from .link import LinkMonitor, LinkState
 from .model import Sample
 from .theme import DARK_THEME, LIGHT_THEME
+from .ui.help_dialog import HelpDialog
 from .ui.plot_panel import PlotPanel
 from .ui.settings_panel import SettingsPanel
 from .ui.table_panel import TablePanel
@@ -112,6 +113,7 @@ class MainWindow(QMainWindow):
 
         self.topbar.connect_clicked.connect(self._toggle_connection)
         self.topbar.install_clicked.connect(self._install_driver)
+        self.topbar.help_clicked.connect(self.show_help)
         self.topbar.open_log_clicked.connect(
             lambda: self.topbar.open_folder(self.settings.csv_dir))
         self.topbar.chk_sim.toggled.connect(self._on_widget_changed)
@@ -125,6 +127,12 @@ class MainWindow(QMainWindow):
         quit_action.setShortcut(QKeySequence.Quit)
         quit_action.triggered.connect(self.close)
         self.addAction(quit_action)
+
+    def show_help(self) -> HelpDialog:
+        """Open Help, built from the settings as they are now."""
+        dlg = HelpDialog(self.settings, self)
+        dlg.show()
+        return dlg
 
     # -- Settings <-> panels
     def _load_settings_into_panels(self) -> None:

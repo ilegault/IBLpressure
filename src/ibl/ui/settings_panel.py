@@ -32,6 +32,7 @@ from ..config import (
     late_preview,
 )
 from ..csvlogger import estimate_bytes_per_day, format_size_preview
+from ..help_text import HELP_HINT
 from .table_panel import (
     COL_CG_PRESS,
     COL_CG_STATUS,
@@ -102,7 +103,8 @@ class SettingsPanel(QGroupBox):
         self.spn_late = CompactSpin(MIN_LATE_AFTER_SAMPLES, MAX_LATE_AFTER_SAMPLES, 3,
                                     suffix=" samples")
         tip = ("The status turns amber (Late) and the table shows STALE "
-               "when this many samples in a row are missing.")
+               "when this many samples in a row are missing. "
+               + HELP_HINT)
         self.spn_late.setToolTip(tip)
         self.spn_late.valueChanged.connect(self.changed)
         self.lbl_late_preview = QLabel()
@@ -140,7 +142,7 @@ class SettingsPanel(QGroupBox):
         f.addRow("Write every:", self.spn_csv)
 
         self.lbl_csv_size = QLabel()
-        self.lbl_csv_size.setToolTip("Estimated size of one day's file at this interval.")
+        self.lbl_csv_size.setToolTip("Estimated size of one day's file at this interval. " + HELP_HINT)
         f.addRow(self.lbl_csv_size)
 
         folder_row = QHBoxLayout()
