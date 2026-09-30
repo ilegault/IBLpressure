@@ -7,7 +7,7 @@ instead of module globals. Behaviour does not change. Spec §2 *Structure*.
 
 **Blocked by:** 06, 08, 09, 10
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
@@ -46,3 +46,4 @@ Gates, in CI order: `ruff check .`, `python scripts/check_tests_first.py`, `pyte
 
 ## Comments
 - 2026-09-29: Implemented. Panels under `src/ibl/ui/`; `mainwindow.py` is 349 lines; theme globals and the `global` statement are gone (panels take `apply_theme(theme)`). Tests that reached moved widgets were rewritten in place to go through the panels. Two test files (`test_window_smoke.py`, and the CSV-reload test in `test_window_plot.py`) now build the window in a fixture instead of a local variable: the old accidental reference cycle (button lambdas capturing the window) used to keep it alive until qtbot closed it; without it the window was garbage-collected with its worker thread still running, which aborts the process. Assertions are unchanged. Ticket stays in-progress until the PR merges.
+- 2026-09-30: PR merged; set to done.

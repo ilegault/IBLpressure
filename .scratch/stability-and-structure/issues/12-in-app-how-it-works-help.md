@@ -7,7 +7,7 @@ AGENTS.md rule 8; spec §2 *In-app help*.
 
 **Blocked by:** 11
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
