@@ -146,22 +146,28 @@ def test_decimate_uses_lo_and_hi_of_summary_points():
 
 
 def test_decimate_empty_bucket_is_a_break():
+    # Two data points 9 s apart.  effective_gap = max(gap_s=2, width=1+1) = 2 s.
+    # 9 s > 2 s → exactly one NaN break is inserted between them.
+    # (The old behaviour — one NaN per empty bucket — was removed because it
+    # caused every dense trace to render as isolated dots.)
     t = np.array([0.5, 9.5])
     p = np.array([1.0, 2.0])
-    _t_out, p_out = minmax_decimate(t, p, p, 0.0, 10.0, 10, gap_s=1e9)
-    assert list(p_out[:1]) == [1.0]
-    assert np.isnan(p_out[1:-1]).all() and len(p_out) == 10
-    assert p_out[-1] == 2.0
+    _t_out, p_out = minmax_decimate(t, p, p, 0.0, 10.0, 10, gap_s=2.0)
+    assert len(p_out) == 3
+    assert p_out[0] == 1.0
+    assert np.isnan(p_out[1])
+    assert p_out[2] == 2.0
 
 
 def test_decimate_ignores_nan_points_and_empty_input():
+    # All-NaN data: every point is filtered out by the finite check → empty output.
     t = np.arange(5, dtype=float)
     p = np.full(5, np.nan)
     t_out, p_out = minmax_decimate(t, p, p, 0.0, 5.0, 2, gap_s=1e9)
-    assert np.isnan(p_out).all()
+    assert len(t_out) == 0
+    # Completely empty input → also empty output (no per-bucket NaN any more).
     t_out, p_out = minmax_decimate(np.array([]), np.array([]), np.array([]), 0.0, 5.0, 2, 1e9)
-    # no data at all: every bucket is empty, so the line is just breaks (one NaN each)
-    assert len(t_out) == 2 and np.isnan(p_out).all()
+    assert len(t_out) == 0
 
 
 def test_gap_becomes_a_break():

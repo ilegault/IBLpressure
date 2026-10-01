@@ -169,20 +169,22 @@ def minmax_decimate(
         out_p += [first_val, second_val[~single]]
         out_key += [b_of_group * 2, b_of_group[~single] * 2 + 1]
 
-    gaps = np.flatnonzero(~present)
-    if len(gaps):
-        out_t.append(t0 + (gaps + 0.5) * width)
-        out_p.append(np.full(len(gaps), np.nan))
-        out_key.append(gaps * 2)
-
     if not out_t:
         return empty, empty.copy()
     order = np.argsort(np.concatenate(out_key), kind="stable")
     t_out = np.concatenate(out_t)[order]
     p_out = np.concatenate(out_p)[order]
 
+    # A real gap is wider than both the data-staleness threshold AND one bucket
+    # width.  Using gap_s alone would insert NaN between adjacent occupied
+    # buckets whenever bucket_width > gap_s (e.g. 86 s buckets in a 24 h view
+    # with gap_s = 3 s), turning a continuous trace into isolated dashes.
+    # The +1.0 absorbs integer-alignment noise: the first sample of bucket B+1
+    # can be up to ceil(width) seconds after the first sample of bucket B, i.e.
+    # at most width + 1 s, so the threshold must exceed width + 1.
+    effective_gap = max(gap_s, width + 1.0)
     both = np.isfinite(p_out[:-1]) & np.isfinite(p_out[1:])
-    breaks = np.flatnonzero(both & (np.diff(t_out) > gap_s)) + 1
+    breaks = np.flatnonzero(both & (np.diff(t_out) > effective_gap)) + 1
     if len(breaks):
         mid = (t_out[breaks - 1] + t_out[breaks]) / 2
         t_out = np.insert(t_out, breaks, mid)
