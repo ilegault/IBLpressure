@@ -33,7 +33,11 @@ from ibl.config import Settings
 
 
 class FakeLjm:
-    def __init__(self, fail_reads=0, fail_opens=0):
+    def __init__(self, fail_reads=0, fail_opens=0, watchdog=(0, 0, 0, 0), watchdog_error=None):
+        self.watchdog = list(watchdog)
+        self.watchdog_error = watchdog_error
+        self.writes = []                 # (names, values) of every eWriteNames call
+        self.reads = []                  # names of every eReadNames call
         self.fail_reads = fail_reads
         self.fail_opens = fail_opens
         self.opens = 0
@@ -58,10 +62,16 @@ class FakeLjm:
     def eReadName(self, _h, _name):
         return 1.0234
 
-    def eWriteNames(self, *_args):
+    def eWriteNames(self, _h, _n, names, values):
         self.calls.append("eWriteNames")
+        self.writes.append((list(names), list(values)))
 
-    def eReadNames(self, _h, n, _names):
+    def eReadNames(self, _h, n, names):
+        self.reads.append(list(names))
+        if names[0].startswith("WATCHDOG"):
+            if self.watchdog_error is not None:
+                raise self.watchdog_error
+            return list(self.watchdog)
         if self.fail_reads:
             self.fail_reads -= 1
             raise OSError("timeout")
@@ -300,3 +310,63 @@ def test_messages_round_trip_through_pickle(monkeypatch):
 @pytest.mark.parametrize("cls", [Alive, Reopen, LibraryReset, Quit])
 def test_parameterless_messages_compare_equal(cls):
     assert cls() == cls()
+
+
+# --- Device watchdog ---------------------------------------------------------
+WATCHDOG_NAMES = [
+    "WATCHDOG_ENABLE_DEFAULT",
+    "WATCHDOG_TIMEOUT_S_DEFAULT",
+    "WATCHDOG_RESET_ENABLE_DEFAULT",
+    "WATCHDOG_STRICT_ENABLE_DEFAULT",
+]
+
+
+def _watchdog_writes(fake):
+    return [w for w in fake.writes if w[0] and w[0][0] == "WATCHDOG_ENABLE_DEFAULT"]
+
+
+def test_watchdog_timeout_constant():
+    assert config.WATCHDOG_TIMEOUT_S == 60
+
+
+def test_watchdog_written_when_off(monkeypatch):
+    fake = FakeLjm(watchdog=(0, 0, 0, 0))
+    acq = _acq(monkeypatch, fake)
+    acq.handle(Start(_real()), 0.0)
+    assert fake.reads[0] == WATCHDOG_NAMES
+    assert _watchdog_writes(fake) == [(WATCHDOG_NAMES + ["WATCHDOG_ENABLE_DEFAULT"], [0, 60, 1, 0, 1])]
+    assert len(fake.writes) == 2         # the AIN configuration plus the watchdog
+
+
+def test_watchdog_not_rewritten_when_already_set(monkeypatch):
+    fake = FakeLjm(watchdog=(1, 60, 1, 0))
+    acq = _acq(monkeypatch, fake)
+    acq.handle(Start(_real()), 0.0)
+    acq.handle(Reopen(), 1.0)
+    acq.handle(LibraryReset(), 2.0)
+    assert _watchdog_writes(fake) == []  # flash wear: never rewrite what already matches
+
+
+@pytest.mark.parametrize("registers", [(1, 30, 1, 0), (1, 60, 0, 0), (0, 60, 1, 0), (1, 60, 1, 1)])
+def test_watchdog_written_when_any_register_differs(monkeypatch, registers):
+    fake = FakeLjm(watchdog=registers)
+    acq = _acq(monkeypatch, fake)
+    acq.handle(Start(_real()), 0.0)
+    assert len(_watchdog_writes(fake)) == 1
+
+
+def test_watchdog_failure_does_not_block_link(monkeypatch):
+    fake = FakeLjm(watchdog_error=OSError("bad"))
+    acq = _acq(monkeypatch, fake)
+    events = acq.handle(Start(_real()), 0.0)
+    assert events == [
+        LinkUp("T7 #470012345 over USB", "1.2300", "1.0234", "Device watchdog not set: bad")
+    ]
+    assert [type(e) for e in acq.tick(1.0)] == [SampleReady]
+
+
+def test_simulation_never_touches_watchdog(monkeypatch):
+    fake = FakeLjm()
+    acq = _acq(monkeypatch, fake)
+    acq.handle(Start(Settings(simulate=True)), 0.0)
+    assert fake.calls == [] and fake.reads == [] and fake.writes == []

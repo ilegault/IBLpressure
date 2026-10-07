@@ -41,6 +41,7 @@ TRIES_PER_STEP = 3                       # Reopen and Library reset try this man
 ACQUISITION_RESTART_INTERVAL_S = 30.0    # between Acquisition restarts
 HUNG_AFTER_S = 15.0                      # a connected child silent this long is hung
 
+WATCHDOG_TIMEOUT_S = 60                  # the T7 restarts itself after this long without the app
 HEARTBEAT_S = 1.0                        # the acquisition child says it is alive this often
 
 # --- Link log ---

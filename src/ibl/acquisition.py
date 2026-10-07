@@ -34,7 +34,7 @@ import time
 from dataclasses import dataclass
 
 from .channels import AIN_NAMES, CHANNELS
-from .config import HEARTBEAT_S, MAX_SAMPLE_HZ, MIN_SAMPLE_HZ, Settings
+from .config import HEARTBEAT_S, MAX_SAMPLE_HZ, MIN_SAMPLE_HZ, WATCHDOG_TIMEOUT_S, Settings
 from .conversion import convert
 from .model import Sample
 
@@ -52,6 +52,16 @@ except Exception as exc:  # pragma: no cover - depends on the machine  # noqa: B
 _log = logging.getLogger(__name__)
 
 READS_BEFORE_LOST = 3
+
+# The Device watchdog registers, flash-stored `_DEFAULT` ones, with the values we want:
+# enabled, WATCHDOG_TIMEOUT_S, reset-on-timeout enabled, strict mode off.
+_WATCHDOG_NAMES = [
+    "WATCHDOG_ENABLE_DEFAULT",
+    "WATCHDOG_TIMEOUT_S_DEFAULT",
+    "WATCHDOG_RESET_ENABLE_DEFAULT",
+    "WATCHDOG_STRICT_ENABLE_DEFAULT",
+]
+_WATCHDOG_WANTED = [1, WATCHDOG_TIMEOUT_S, 1, 0]
 
 
 # --- messages ---------------------------------------------------------------
@@ -259,7 +269,9 @@ class Acquisition:
                 [199, 10.0, float(self._settings.resolution_index)],
             )
             self._handle = handle
+            watchdog_warning = self._set_device_watchdog(handle)
             version, firmware, warning = self._describe(handle)
+            warning = "; ".join(w for w in (watchdog_warning, warning) if w)
             return [LinkUp(f"T7 #{serial} over {self._settings.connection}",
                            version, firmware, warning)]
         except Exception as exc:  # noqa: BLE001 - any failure is reported or handled here
@@ -267,6 +279,24 @@ class Acquisition:
             if handle is not None:
                 self._close_handle(handle)
             return [LinkDown(str(exc))]
+
+    def _set_device_watchdog(self, handle) -> str:
+        """Make the T7 restart itself after WATCHDOG_TIMEOUT_S of silence. Returns a warning.
+
+        The `_DEFAULT` registers live in flash, so they are written only when they differ.
+        A failure here never blocks the Link; it rides on `LinkUp.warning`.
+        """
+        try:
+            current = ljm.eReadNames(handle, len(_WATCHDOG_NAMES), _WATCHDOG_NAMES)
+            if [float(v) for v in current] == [float(v) for v in _WATCHDOG_WANTED]:
+                return ""
+            # Disable first so the new timeout is accepted, enable last.
+            names = [*_WATCHDOG_NAMES, "WATCHDOG_ENABLE_DEFAULT"]
+            values = [0, WATCHDOG_TIMEOUT_S, 1, 0, 1]
+            ljm.eWriteNames(handle, len(names), names, values)
+        except Exception as exc:  # noqa: BLE001 - reported on the LinkUp warning
+            return f"Device watchdog not set: {exc}"
+        return ""
 
     def _describe(self, handle) -> tuple[str, str, str]:
         """LJM version, T7 firmware and a warning for things that did not stop the Link."""
