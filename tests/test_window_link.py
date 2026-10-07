@@ -9,6 +9,7 @@ from ibl import config
 from ibl.channels import CHANNELS, PAIRS
 from ibl.config import Settings
 from ibl.conversion import convert
+from ibl.escalation import Attempt, Step
 from ibl.mainwindow import MainWindow
 from ibl.model import Sample
 from ibl.theme import DARK_THEME, LIGHT_THEME
@@ -246,5 +247,5 @@ def test_reconnecting_signal_still_reads_as_a_reopen(window, clock):
     _connect(window, clock)
     window._on_sample(_sample(0.0))
     clock.t = 2.0
-    window._on_reconnecting(2)
+    window._on_reconnecting(Attempt(Step.REOPEN, 2, 3, 2, False))
     assert window.topbar.lbl_status.text() == "Reconnecting — Reopen (attempt 2 of 3)…"

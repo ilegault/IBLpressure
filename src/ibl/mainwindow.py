@@ -1,5 +1,5 @@
 """
-The one and only window: it wires the panels to the worker, the LinkMonitor,
+The one and only window: it wires the panels to the Supervisor, the LinkMonitor,
 the History and the CSV logger.  The widgets live in `ibl.ui`.
 
     TopBar        connect, simulation, dot, status text, CSV label
@@ -8,10 +8,15 @@ the History and the CSV logger.  The widgets live in `ibl.ui`.
 
 Link state (the dot and the status line):
 
-    DaqWorker --link_up/link_down/reconnecting/read_error--> MainWindow
+    acquisition child process --messages--> Supervisor (ibl.supervisor, drives Escalation)
+    a 100 ms QTimer calls Supervisor.poll(now) and hands each window event
+        (Up / Down / Reconnecting / ReadError / NewSample) to the matching slot
     MainWindow --forwards each, with the clock--> LinkMonitor (ibl.link)
     every 500 ms and after every event: _render_link() asks LinkMonitor.view(now)
     and draws the dot colour and the status text from that one LinkView.
+
+The window never waits on LJM: Connect, Disconnect and Quit stop the child with a short
+timeout and kill it if it does not answer (ADR 0003).
 
 A number is only shown in a pressure cell while the Link is Live; otherwise the
 cell shows STALE and the last value moves to the Status column with its age.
@@ -25,7 +30,7 @@ import sys
 import time
 
 import numpy as np
-from PySide6.QtCore import QMetaObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -37,13 +42,13 @@ from PySide6.QtWidgets import (
 
 from . import __version__, driver
 from .channels import CHANNELS
-from .config import TRIES_PER_STEP, Settings
+from .config import WINDOW_POLL_MS, Settings
 from .csvlogger import DailyCsvLogger, load_recent_history
-from .daq import DaqWorker
 from .escalation import Attempt, Step
 from .history import History
 from .link import LinkMonitor, LinkState
 from .model import Sample
+from .supervisor import Down, NewSample, ReadError, Reconnecting, Supervisor, Up
 from .theme import DARK_THEME, LIGHT_THEME
 from .ui.help_dialog import HelpDialog
 from .ui.plot_panel import PlotPanel
@@ -53,13 +58,10 @@ from .ui.topbar import TopBar
 
 
 class MainWindow(QMainWindow):
-    settings_changed = Signal(object)
-    start_worker = Signal()
-    stop_worker = Signal()
-
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, supervisor: Supervisor | None = None):
         super().__init__()
         self.settings = settings
+        self.supervisor = supervisor if supervisor is not None else Supervisor()
         self.history = History(len(CHANNELS))
         self._chan_index = {c.ain: i for i, c in enumerate(CHANNELS)}
         self.logger = DailyCsvLogger(settings.csv_dir, settings.csv_include_voltages)
@@ -83,7 +85,7 @@ class MainWindow(QMainWindow):
         self._building = False
 
         self._reload_history_from_csv()
-        self._start_worker()
+        self._start_supervisor_timer()
 
         # Ages the status line and the STALE table even when no event arrives.
         self._link_timer = QTimer(self, interval=500)
@@ -174,7 +176,8 @@ class MainWindow(QMainWindow):
         self._render_link()
         self.logger.reconfigure(s.csv_dir, s.csv_include_voltages)
         self._apply_appearance()
-        self.settings_changed.emit(dataclasses.replace(s))
+        # The child gets a copy, never self.settings (AGENTS.md rule 2).
+        self.supervisor.update_settings(self._now(), dataclasses.replace(s))
         self._redraw_plot()
 
     def _on_plotted_changed(self) -> None:
@@ -217,58 +220,57 @@ class MainWindow(QMainWindow):
                                 "restart IBL Pressure.")
             self._render_link()
 
-    # -- Acquisition thread
-    def _start_worker(self) -> None:
-        self.thread = QThread(self)
-        self.worker = DaqWorker(dataclasses.replace(self.settings))
-        self.worker.moveToThread(self.thread)
-
-        # Not connected to thread.started: the thread idles until Connect is pressed.
-        self.start_worker.connect(self.worker.start)
-        self.worker.sample.connect(self._on_sample)
-        self.worker.link_up.connect(self._on_link_up)
-        self.worker.link_down.connect(self._on_link_down)
-        self.worker.reconnecting.connect(self._on_reconnecting)
-        self.worker.read_error.connect(self._on_read_error)
-        self.settings_changed.connect(self.worker.update_settings)
-        self.stop_worker.connect(self.worker.stop)
-
-        self.thread.start()
-
+    # -- Acquisition: the Supervisor owns the child process
+    def _start_supervisor_timer(self) -> None:
+        # Nothing connects until the operator presses Connect; the timer only listens.
+        self._poll_timer = QTimer(self, interval=WINDOW_POLL_MS)
+        self._poll_timer.timeout.connect(self._poll_supervisor)
+        self._poll_timer.start()
         self._refresh_driver_state()
+
+    def _poll_supervisor(self) -> None:
+        """Hand every event the Supervisor has to the slot that feeds LinkMonitor."""
+        for event in self.supervisor.poll(self._now()):
+            if isinstance(event, NewSample):
+                self._on_sample(event.sample)
+            elif isinstance(event, Up):
+                self._on_link_up(event.description, event.recovered_by)
+            elif isinstance(event, Down):
+                self._on_link_down(event.reason, event.attempt)
+            elif isinstance(event, Reconnecting):
+                self._on_reconnecting(event.attempt)
+            elif isinstance(event, ReadError):
+                self._on_read_error(event.message)
 
     def _toggle_connection(self) -> None:
         now = self._now()
         if self._link_wanted:
             self._link_wanted = False
             self.link.disconnect_requested(now)
-            self.stop_worker.emit()
+            self.supervisor.disconnect(now)
             self.topbar.btn_connect.setText("Connect")
         else:
             self._link_wanted = True
             self.link.connect_requested(now)
             self.topbar.btn_connect.setText("Disconnect")
-            # The worker already has the current settings; just tell it to open.
-            self.start_worker.emit()
+            self.supervisor.connect(now, dataclasses.replace(self.settings))
         self._render_link()
 
     # -- Link events: forwarded to LinkMonitor, then one redraw ---------------
-    def _on_link_up(self, description: str) -> None:
-        self.link.link_up(self._now(), description)
+    def _on_link_up(self, description: str, recovered_by: Step | None = None) -> None:
+        self.link.link_up(self._now(), description, recovered_by)
         self._render_link()
 
-    def _on_link_down(self, reason: str) -> None:
-        self.link.link_down(self._now(), reason, None)    # replaced in ticket 20
+    def _on_link_down(self, reason: str, attempt: Attempt | None = None) -> None:
+        self.link.link_down(self._now(), reason, attempt)
         # If the link is down because the LJM driver is missing, the driver
         # check owns the status line (and shows the Install button).
         if not self.settings.simulate:
             self._refresh_driver_state()
         self._render_link()
 
-    def _on_reconnecting(self, attempt: int) -> None:
-        # replaced in ticket 20
-        self.link.reconnecting(
-            self._now(), Attempt(Step.REOPEN, attempt, TRIES_PER_STEP, attempt, False))
+    def _on_reconnecting(self, attempt: Attempt) -> None:
+        self.link.reconnecting(self._now(), attempt)
         self._render_link()
 
     def _on_read_error(self, message: str) -> None:
@@ -348,13 +350,8 @@ class MainWindow(QMainWindow):
         problem = self._harvest_panels().save()
         if problem:
             print(problem, file=sys.stderr)  # the window is closing; stderr is all we have
-        # Use a blocking call so the worker's stop() (and LJM handle close)
-        # finishes on the worker thread before we quit it.  A queued emit
-        # would race with thread.quit() and could leave the device open.
-        QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
-        self.thread.quit()
-        self.thread.wait(5000)
-        # Safety net: close every LJM handle so the next launch has no phantom handles.
-        self.worker.cleanup()
+        # Never waits on LJM: the Supervisor asks the child to quit, then terminates, then kills.
+        self._poll_timer.stop()
+        self.supervisor.shutdown()
         self.logger.close()
         super().closeEvent(event)

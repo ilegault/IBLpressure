@@ -10,6 +10,7 @@ Build a Windows exe:  build.bat   (one folder, one window, no console)
 """
 from __future__ import annotations
 
+import multiprocessing
 import os
 import sys
 import traceback
@@ -65,4 +66,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # The acquisition child is a spawned process; a frozen exe needs this to start it.
+    multiprocessing.freeze_support()
     sys.exit(main())
