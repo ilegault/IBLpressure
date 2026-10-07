@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 
 from . import __version__, driver
 from .channels import CHANNELS
-from .config import WINDOW_POLL_MS, Settings
+from .config import CONNECTION_FRAME_EVENTS, WINDOW_POLL_MS, Settings
 from .csvlogger import DailyCsvLogger, load_recent_history
 from .escalation import Attempt, Step
 from .history import History
@@ -131,6 +131,8 @@ class MainWindow(QMainWindow):
         self.plot_panel.clear_requested.connect(self._clear_history)
         self.table_panel.plotted_changed.connect(self._on_plotted_changed)
         self.settings_panel.changed.connect(self._on_widget_changed)
+        self.settings_panel.open_link_log_clicked.connect(
+            lambda: self.topbar.open_folder(self.linklog.folder))
 
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence.Quit)
@@ -273,6 +275,11 @@ class MainWindow(QMainWindow):
     def _log(self, kind: str, detail: str = "", **kwargs) -> None:
         """Write one Link log line. A failure shows on the status line (see _render_link)."""
         self.linklog.record(self._now(), kind, detail, **kwargs)
+        self._refresh_connection_frame()
+
+    def _refresh_connection_frame(self) -> None:
+        self.settings_panel.show_connection(
+            self.linklog.summary(self._now()), self.linklog.recent(CONNECTION_FRAME_EVENTS))
 
     def _connection_text(self) -> str:
         s = self.settings

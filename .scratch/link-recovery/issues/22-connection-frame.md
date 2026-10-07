@@ -1,6 +1,6 @@
 # 22: Connection frame: today's recoveries and recent Link events
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Runner:** any
 
@@ -27,16 +27,16 @@ Qt tests in `tests/test_panels.py` (new tests) use the window fixture with a fak
 child and `csv_dir=tmp_path`. May fake: the child handle, the clock, `open_folder`.
 Must be real: `LinkLog`, the panel widgets.
 
-- [ ] The Settings box contains a group titled `Connection` with a summary label, a
+- [x] The Settings box contains a group titled `Connection` with a summary label, a
   `QListWidget` that is not editable, and a button labelled `Open Link log`.
-- [ ] Test `test_frame_shows_todays_summary`: after two recoveries (Reopen, gap 7 s;
+- [x] Test `test_frame_shows_todays_summary`: after two recoveries (Reopen, gap 7 s;
   Library reset, gap 42 s) the label reads
   `Today: 2 recoveries — Reopen 1, Library reset 1 · longest gap 42 s`.
-- [ ] Test `test_frame_lists_newest_twenty`: after 25 Link log records the list has 20
+- [x] Test `test_frame_lists_newest_twenty`: after 25 Link log records the list has 20
   rows and row 0 is the newest record's line.
-- [ ] Test `test_open_link_log_button`: clicking it calls `open_folder` with
+- [x] Test `test_open_link_log_button`: clicking it calls `open_folder` with
   `<csv_dir>/link-log`.
-- [ ] Test `test_frame_survives_restart`: a new window on the same `csv_dir` shows
+- [x] Test `test_frame_survives_restart`: a new window on the same `csv_dir` shows
   the same summary and rows (read back from the month file).
 
 ## Gate
@@ -48,3 +48,9 @@ Run in CI's order (`.github/workflows/ci.yml`):
 3. `pytest -q`
 
 ## Comments
+
+2026-10-07 — Settings box has a fifth group, `Connection` (`SettingsPanel.lbl_link_summary`,
+`lst_link_events`, `btn_open_link_log`), drawn by `SettingsPanel.show_connection` and refreshed from
+`MainWindow._log` after every record and at startup. The button opens `LinkLog.folder` through
+`TopBar.open_folder`. Tests are in `tests/test_panels.py` (the box must be expanded before its
+button is enabled, as for an operator).

@@ -5,6 +5,7 @@ import math
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -52,6 +54,7 @@ class SettingsPanel(QGroupBox):
     channels live on the plot and table panels.
     """
     changed = Signal()
+    open_link_log_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__("Settings", parent)
@@ -208,7 +211,35 @@ class SettingsPanel(QGroupBox):
             f.addRow(chk)
             self.col_chk[col] = chk
 
-        grid.setColumnStretch(5, 1)
+        # --- Connection: today's recoveries and the latest Link log lines (read-only) ---
+        f = add(5, "Connection")
+        self.lbl_link_summary = QLabel("Today: no recoveries")
+        self.lbl_link_summary.setToolTip(
+            "How often the app got the T7 back on its own today, and by which step. "
+            + HELP_HINT)
+        f.addRow(self.lbl_link_summary)
+        self.lst_link_events = QListWidget()
+        self.lst_link_events.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.lst_link_events.setSelectionMode(QAbstractItemView.NoSelection)
+        self.lst_link_events.setWordWrap(False)
+        self.lst_link_events.setMinimumWidth(360)
+        self.lst_link_events.setMaximumHeight(110)
+        self.lst_link_events.setToolTip(
+            "The latest Link log lines, newest first. The full record is in the link-log "
+            "folder. " + HELP_HINT)
+        f.addRow(self.lst_link_events)
+        self.btn_open_link_log = QPushButton("Open Link log")
+        self.btn_open_link_log.setToolTip("Open the folder holding the Link log files.")
+        self.btn_open_link_log.clicked.connect(self.open_link_log_clicked)
+        f.addRow(self.btn_open_link_log)
+
+        grid.setColumnStretch(6, 1)
+
+    def show_connection(self, summary: str, lines: list[str]) -> None:
+        """Draw the Connection frame: called only from MainWindow after a Link log record."""
+        self.lbl_link_summary.setText(summary)
+        self.lst_link_events.clear()
+        self.lst_link_events.addItems(lines)
 
     # -- settings <-> widgets -----------------------------------------------------
     def load(self, s: Settings) -> None:
