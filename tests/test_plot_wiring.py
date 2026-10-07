@@ -31,7 +31,6 @@ from ibl.mainwindow import MainWindow
 from ibl.model import Sample
 from ibl.theme import TIME_SPANS
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -355,7 +354,6 @@ def test_redraw_due_fires_within_span_when_plot_has_zero_width(
     returns 0 (before the window has been painted).  The broken behaviour is
     that max(1.0, span/max(1.0, 0)) == span, so a 5-minute span blocks redraws
     for 300 seconds after the first one fires."""
-    import time as _time
     path = str(tmp_path / "settings.json")
     monkeypatch.setattr(config, "SETTINGS_PATH", path)
     monkeypatch.setattr(Settings.save, "__defaults__", (path,))
@@ -440,6 +438,7 @@ def test_unchecking_gauge_hides_curve(window, clock):
     """Unchecking a gauge's plot checkbox must make its curve invisible and
     trigger a redraw that skips that channel — same as the operator sees."""
     from PySide6.QtCore import Qt
+
     from ibl.ui.table_panel import COL_IG_PLOT
 
     _plot_all(window)
@@ -462,6 +461,7 @@ def test_rechecking_gauge_shows_data_from_history(window, clock):
     """Re-checking a gauge must make its curve visible and show the history
     data that accumulated while the checkbox was unticked."""
     from PySide6.QtCore import Qt
+
     from ibl.ui.table_panel import COL_IG_PLOT
 
     _plot_all(window)
