@@ -225,3 +225,26 @@ def test_dark_mode_changes_stale_colour(window, clock):
     cell = window.table_panel.table.item(0, COL_IG_PRESS)
     assert cell.text() == "STALE"
     assert cell.background().color().name() == DARK_THEME["stale_bg"]
+
+
+def test_status_tooltip_carries_the_latest_labjack_error(window, clock):
+    _connect(window, clock)
+    window._on_sample(_sample(0.0))
+
+    clock.t = 2.0
+    window._on_link_down("1298 LJME_ATTR_LOAD_COMM_FAILURE")
+    assert "1298 LJME_ATTR_LOAD_COMM_FAILURE" in window.topbar.lbl_status.toolTip()
+
+    clock.t = 3.0
+    window._on_link_up("Simulation mode")
+    window._on_sample(_sample(3.0))
+    assert "1298 LJME_ATTR_LOAD_COMM_FAILURE" not in window.topbar.lbl_status.toolTip()
+    assert "fresh data" in window.topbar.lbl_status.toolTip()      # the normal tooltip is back
+
+
+def test_reconnecting_signal_still_reads_as_a_reopen(window, clock):
+    _connect(window, clock)
+    window._on_sample(_sample(0.0))
+    clock.t = 2.0
+    window._on_reconnecting(2)
+    assert window.topbar.lbl_status.text() == "Reconnecting — Reopen (attempt 2 of 3)…"

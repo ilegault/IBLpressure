@@ -37,9 +37,10 @@ from PySide6.QtWidgets import (
 
 from . import __version__, driver
 from .channels import CHANNELS
-from .config import Settings
+from .config import TRIES_PER_STEP, Settings
 from .csvlogger import DailyCsvLogger, load_recent_history
 from .daq import DaqWorker
+from .escalation import Attempt, Step
 from .history import History
 from .link import LinkMonitor, LinkState
 from .model import Sample
@@ -257,7 +258,7 @@ class MainWindow(QMainWindow):
         self._render_link()
 
     def _on_link_down(self, reason: str) -> None:
-        self.link.link_down(self._now(), reason)
+        self.link.link_down(self._now(), reason, None)    # replaced in ticket 20
         # If the link is down because the LJM driver is missing, the driver
         # check owns the status line (and shows the Install button).
         if not self.settings.simulate:
@@ -265,7 +266,9 @@ class MainWindow(QMainWindow):
         self._render_link()
 
     def _on_reconnecting(self, attempt: int) -> None:
-        self.link.reconnecting(self._now(), attempt)
+        # replaced in ticket 20
+        self.link.reconnecting(
+            self._now(), Attempt(Step.REOPEN, attempt, TRIES_PER_STEP, attempt, False))
         self._render_link()
 
     def _on_read_error(self, message: str) -> None:
@@ -284,7 +287,7 @@ class MainWindow(QMainWindow):
             text = self._driver_msg
         if self._settings_problem:
             text = f"{self._settings_problem} · {text}"
-        self.topbar.show_link(view.dot_color, text)
+        self.topbar.show_link(view.dot_color, text, view.detail)
         if view.state is not LinkState.LIVE and self._last_sample is not None:
             self.table_panel.show_stale(self._last_sample,
                                         max(0.0, now - self._last_sample_now))

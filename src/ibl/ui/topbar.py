@@ -60,8 +60,8 @@ class TopBar(QWidget):
 
         self.lbl_status = QLabel("")
         self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.lbl_status.setToolTip(
-            f"Says whether fresh data is arriving from the T7. {HELP_HINT}")
+        self._status_tooltip = f"Says whether fresh data is arriving from the T7. {HELP_HINT}"
+        self.lbl_status.setToolTip(self._status_tooltip)
         bar.addWidget(self.lbl_status, 1)
 
         self.btn_install = QPushButton("Install driver")
@@ -84,11 +84,18 @@ class TopBar(QWidget):
         bar.addWidget(self.btn_help)
         QShortcut(QKeySequence("F1"), self, activated=self.help_clicked)
 
-    def show_link(self, dot_color: str, text: str) -> None:
-        """Draw the dot and the status line; called only from MainWindow._render_link."""
+    def show_link(self, dot_color: str, text: str, detail: str = "") -> None:
+        """Draw the dot and the status line; called only from MainWindow._render_link.
+
+        `detail` is the latest LabJack error while the Link is not Live; it joins the tooltip.
+        """
         self.lbl_link.setStyleSheet(_dot_style(dot_color))
         self.lbl_link.setText(DOT)
         self.lbl_status.setText(text)
+        tip = self._status_tooltip
+        if detail:
+            tip = f"Latest LabJack error: {detail}\n\n{tip}"
+        self.lbl_status.setToolTip(tip)
 
     def run_installer(self) -> bool:
         """Offer the bundled LabJack installer.  True if it was launched."""
