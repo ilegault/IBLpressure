@@ -130,5 +130,10 @@ class Escalation:
         return self._in_flight
 
     @property
+    def current_step(self) -> Step | None:
+        """The step of the latest Attempt, or None before the first one."""
+        return self._current
+
+    @property
     def last_reason(self) -> str:
         return self._last_reason

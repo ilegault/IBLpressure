@@ -42,6 +42,8 @@ ACQUISITION_RESTART_INTERVAL_S = 30.0    # between Acquisition restarts
 HUNG_AFTER_S = 15.0                      # a connected child silent this long is hung
 
 WATCHDOG_TIMEOUT_S = 60                  # the T7 restarts itself after this long without the app
+STOP_TIMEOUT_S = 2.0                     # the window waits this long for a clean child exit
+KILL_JOIN_S = 0.5                        # then this long after terminate, before kill
 HEARTBEAT_S = 1.0                        # the acquisition child says it is alive this often
 
 # --- Link log ---

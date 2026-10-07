@@ -156,3 +156,22 @@ def test_failed_reason_is_kept():
     esc.due(0.0)
     esc.failed(0.0, "LJME_ATTR_LOAD_COMM_FAILURE")
     assert esc.last_reason == "LJME_ATTR_LOAD_COMM_FAILURE"
+
+
+def test_current_step_is_the_step_of_the_latest_attempt():
+    esc = Escalation()
+    assert esc.current_step is None
+    esc.lost(0.0, retry_now=True)
+    assert esc.current_step is None            # nothing tried yet
+    esc.due(0.0)
+    assert esc.current_step is Step.REOPEN
+    esc.failed(0.0, "x")
+    assert esc.current_step is Step.REOPEN     # still the latest one tried
+    esc.due(5.0)
+    esc.failed(5.0, "x")
+    esc.due(10.0)
+    esc.failed(10.0, "x")
+    esc.due(15.0)
+    assert esc.current_step is Step.LIBRARY_RESET
+    esc.recovered(16.0)
+    assert esc.current_step is None
