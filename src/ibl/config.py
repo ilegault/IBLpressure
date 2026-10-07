@@ -41,6 +41,8 @@ TRIES_PER_STEP = 3                       # Reopen and Library reset try this man
 ACQUISITION_RESTART_INTERVAL_S = 30.0    # between Acquisition restarts
 HUNG_AFTER_S = 15.0                      # a connected child silent this long is hung
 
+HEARTBEAT_S = 1.0                        # the acquisition child says it is alive this often
+
 # --- Link log ---
 LINK_LOG_FOLD_S = 600.0                  # repeats of one (kind, key) inside this window fold
 CONNECTION_FRAME_EVENTS = 20             # Link log lines the Connection frame shows

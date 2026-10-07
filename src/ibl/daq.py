@@ -24,12 +24,11 @@ gets a copy of Settings each time they change.
 """
 from __future__ import annotations
 
-import math
-import random
 import time
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 
+from .acquisition import _Simulator
 from .channels import AIN_NAMES, CHANNELS
 from .config import MAX_SAMPLE_HZ, MIN_SAMPLE_HZ, Settings
 from .conversion import convert
@@ -45,34 +44,6 @@ except Exception as exc:  # pragma: no cover - depends on the machine  # noqa: B
     ljm = None  # type: ignore
     LJM_AVAILABLE = False
     LJM_IMPORT_ERROR = str(exc)
-
-
-class _Simulator:
-    """Plausible fake voltages so the GUI can be exercised with no T7 plugged in."""
-
-    def __init__(self) -> None:
-        self.t0 = time.time()
-        self.phase = [random.random() * 6.28 for _ in CHANNELS]
-
-    def read(self) -> list[float]:
-        t = time.time() - self.t0
-        volts: list[float] = []
-        for i, ch in enumerate(CHANNELS):
-            wobble = math.sin(t / 40.0 + self.phase[i])
-            if ch.is_ion:
-                # centre near 1e-3 Torr (7 V), drifting a decade either way
-                v = 7.0 + 0.8 * wobble + random.gauss(0, 0.004)
-                v = min(max(v, 1.0), 10.0)
-            else:
-                # A pumped beamline sits at the bottom of the Convectron's
-                # useful range, a few mTorr, i.e. around 0.40-0.46 V.
-                v = 0.435 + 0.030 * wobble + random.gauss(0, 0.0006)
-                v = min(max(v, 0.376), 5.65)
-            volts.append(v)
-        # Every so often, fake a gauge fault on SNICS IG so the red row is testable
-        if int(t) % 120 < 6:
-            volts[0] = 10.9
-        return volts
 
 
 class DaqWorker(QObject):
@@ -150,7 +121,7 @@ class DaqWorker(QObject):
         self._reconnect_at = time.time()  # throttle future auto-reconnect attempts
 
         if self._settings.simulate:
-            self._sim = _Simulator()
+            self._sim = _Simulator(time.time())
             self._handle = None
             self._attempt = 0
             self.link_up.emit("Simulation mode")
@@ -221,7 +192,7 @@ class DaqWorker(QObject):
         now = time.time()
 
         if self._sim is not None:
-            volts = self._sim.read()
+            volts = self._sim.read(now)
         elif self._handle is not None:
             try:
                 volts = ljm.eReadNames(self._handle, len(AIN_NAMES), AIN_NAMES)
