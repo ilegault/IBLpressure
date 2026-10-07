@@ -57,6 +57,22 @@ status line reports it ("Recovered at 14:03:22 after a 7 s gap") for 10 s.
 **Gap** — the stretch of time with no Samples between going Late and Recovery. The
 plot shows a Gap as a break in the line, never a line drawn across it.
 
+**Escalation** — what the app does on its own when the Link is lost and a plain
+reopen keeps failing: it climbs through stronger recovery steps one at a time,
+moving up only after the step below has failed — **Reopen**, **Library reset**,
+**Acquisition restart**. If none of them brings the Link back, it shows the
+operator what to do by hand (check the cable, unplug and replug the T7, reboot
+the PC) while it keeps trying. Escalation is never silent: every step is on
+screen and in the Link log.
+
+**Device watchdog** — the T7's own timer that restarts the T7 after a stretch
+with no communication from the app, so a stuck T7 frees itself.
+
+**Link log** — the permanent, on-disk record of every Link event: Connect and
+Disconnect, each loss, each reconnect attempt and its outcome, and the exact
+LabJack error text. It is how a failure is diagnosed after the fact, when nobody
+was watching the screen.
+
 **Stale** — what a pressure cell shows when the Link is not Live: the word STALE,
 never a number. The last value and its age move to the Status column.
 
