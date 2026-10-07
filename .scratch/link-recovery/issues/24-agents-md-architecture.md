@@ -1,6 +1,6 @@
 # 24: AGENTS.md describes the process split
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Runner:** any
 
@@ -26,12 +26,12 @@ Simulation-mode process test as the one that spawns a process.
 
 Docs-only; no code changes.
 
-- [ ] The architecture table rows match the modules that exist under `src/ibl/`
+- [x] The architecture table rows match the modules that exist under `src/ibl/`
   (`ls src/ibl` and the table agree; `daq.py` is gone from both).
-- [ ] Rule 2 and the new LJM rule are present with the wording above.
-- [ ] The `<!-- ACTIVE-PLAN:START -->` … `<!-- ACTIVE-PLAN:END -->` block is
+- [x] Rule 2 and the new LJM rule are present with the wording above.
+- [x] The `<!-- ACTIVE-PLAN:START -->` … `<!-- ACTIVE-PLAN:END -->` block is
   byte-for-byte unchanged (check with `git diff`).
-- [ ] Full gate green.
+- [x] Full gate green.
 
 ## Gate
 
@@ -42,3 +42,10 @@ Run in CI's order (`.github/workflows/ci.yml`):
 3. `pytest -q`
 
 ## Comments
+
+2026-10-07 — AGENTS.md sections 1–3 updated: the architecture table matches `ls src/ibl`
+(`daq.py` gone; `escalation.py`, `linklog.py`, `acquisition.py`, `supervisor.py`, plus the previously
+unlisted `help_text.py`/`theme.py` added); rule 2 now speaks of processes; new rule 9 (only
+`acquisition.py` calls LJM, the window never waits on it) is numbered 9 so existing "rule 7" references
+stay valid; the testing section names the child-handle fake and the real-process tests. The
+`ACTIVE-PLAN` block is byte-for-byte unchanged (diffed). `Auto-merge: no`: needs the developer's approval.
