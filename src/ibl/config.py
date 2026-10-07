@@ -41,6 +41,10 @@ TRIES_PER_STEP = 3                       # Reopen and Library reset try this man
 ACQUISITION_RESTART_INTERVAL_S = 30.0    # between Acquisition restarts
 HUNG_AFTER_S = 15.0                      # a connected child silent this long is hung
 
+# --- Link log ---
+LINK_LOG_FOLD_S = 600.0                  # repeats of one (kind, key) inside this window fold
+CONNECTION_FRAME_EVENTS = 20             # Link log lines the Connection frame shows
+
 
 def late_preview(late_after_samples: int, sample_hz: float) -> str:
     """The Late-after setting in seconds, e.g. '= 3.0 s at 1 Hz'."""
