@@ -5,7 +5,9 @@ away from what the app does (AGENTS.md rules 6 and 8).
 """
 from __future__ import annotations
 
+from . import config
 from .config import (
+    CONNECTION_FRAME_EVENTS,
     MAX_HISTORY_S,
     MAX_LATE_AFTER_SAMPLES,
     MAX_SAMPLE_HZ,
@@ -33,6 +35,11 @@ def help_html(settings: Settings) -> str:
     raw = _span(RAW_SPAN_S)
     bucket = f"{SUMMARY_BUCKET_S} s"
     history = _span(MAX_HISTORY_S)
+    tries = config.TRIES_PER_STEP
+    retry = f"{config.RETRY_INTERVAL_S:g} s"
+    restart = f"{config.ACQUISITION_RESTART_INTERVAL_S:g} s"
+    hung = f"{config.HUNG_AFTER_S:g} s"
+    watchdog = f"{config.WATCHDOG_TIMEOUT_S:g} s"
     return f"""
 <h2>How IBL Pressure works</h2>
 
@@ -44,7 +51,8 @@ delivering fresh data. It is the only thing that says so.</p>
 <li><b>Live (green)</b> &ndash; samples are arriving on time.</li>
 <li><b>Late (amber)</b> &ndash; connecting, reconnecting, or no sample for longer than
 the late threshold (see below).</li>
-<li><b>Down (red)</b> &ndash; the T7 cannot be found; the app retries every 5 s.</li>
+<li><b>Down (red)</b> &ndash; the T7 cannot be found; the app keeps trying to get it back
+on its own (see &ldquo;When the connection drops&rdquo; below).</li>
 </ul>
 <p>One faulted gauge does not change the status light or the status line: a bad gauge
 only changes its own row. After a gap the status line reports the recovery for
@@ -56,6 +64,31 @@ only changes its own row. After a gap the status line reports the recovery for
 new sample. The light turns amber, every pressure cell shows <b>STALE</b>, and the last
 value moves to the Status column with its age. A number in a pressure cell is always
 current; it is never an old value that only looks live.</p>
+
+<h3>When the connection drops</h3>
+<p>If the link to the T7 is lost, the app recovers it on its own, one step at a time,
+moving to a stronger step only after the one below has failed. The status line always
+says which step is running.</p>
+<ol>
+<li><b>Reopen</b> &ndash; close and open the T7 again: {tries} tries, {retry} apart.</li>
+<li><b>Library reset</b> &ndash; reset the LabJack software library, then open again:
+{tries} tries, {retry} apart.</li>
+<li><b>Acquisition restart</b> &ndash; stop the reading process and start a fresh one
+(this reloads the LabJack library from scratch), then open again. Repeated every
+{restart} for as long as it takes. If the reading process stops answering for
+{hung} it is restarted straight away.</li>
+</ol>
+<p>If the first Acquisition restart does not work, the status light turns red and the
+status line says <b>T7 not responding</b>. The app keeps trying, but you can help: check
+the USB cable to the T7, unplug and replug the T7, then reboot this PC.</p>
+<p>The T7 also restarts itself after {watchdog} without contact from this app, which
+frees a T7 that has got stuck. It does this whenever the app is closed too; it is
+harmless, because this app only reads the T7's inputs.</p>
+<p>Every loss, every attempt and every recovery is written to the <b>Link log</b>: one
+file per month in the <code>link-log</code> folder next to the CSV files, kept forever.
+Repeated failures are folded into one line, so a bad night stays short. The
+<b>Connection</b> box inside Settings shows today's recoveries and the last
+{CONNECTION_FRAME_EVENTS} lines of the log; <b>Open Link log</b> opens the folder.</p>
 
 <h3>Gauge status colours</h3>
 <p>These colour only the row of the gauge concerned.</p>

@@ -249,3 +249,9 @@ def test_reconnecting_signal_still_reads_as_a_reopen(window, clock):
     clock.t = 2.0
     window._on_reconnecting(Attempt(Step.REOPEN, 2, 3, 2, False))
     assert window.topbar.lbl_status.text() == "Reconnecting — Reopen (attempt 2 of 3)…"
+
+
+def test_status_dot_tooltip_mentions_automatic_recovery_and_connection_frame(window):
+    tip = window.topbar.lbl_link.toolTip()
+    assert "automatic" in tip.lower()
+    assert "Connection" in tip

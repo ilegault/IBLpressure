@@ -55,7 +55,9 @@ class TopBar(QWidget):
         self.lbl_link.setFixedWidth(16)
         self.lbl_link.setToolTip(
             "Link status: grey = not connected, green = live, amber = late or "
-            f"connecting, red = T7 not found. {HELP_HINT}")
+            "connecting, red = T7 not found. When the link drops the app recovers it "
+            "automatically, step by step; the Connection box in Settings shows today's "
+            f"recoveries and the Link log. {HELP_HINT}")
         bar.addWidget(self.lbl_link)
 
         self.lbl_status = QLabel("")
