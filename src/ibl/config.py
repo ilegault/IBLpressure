@@ -35,6 +35,12 @@ MAX_LATE_AFTER_SAMPLES = 20
 MIN_CSV_INTERVAL_S = 1.0
 MAX_CSV_INTERVAL_S = 3600.0
 
+# --- Link recovery rules (Escalation). Rules, not settings: the operator cannot edit them. ---
+RETRY_INTERVAL_S = 5.0                   # between tries inside Reopen / Library reset
+TRIES_PER_STEP = 3                       # Reopen and Library reset try this many times
+ACQUISITION_RESTART_INTERVAL_S = 30.0    # between Acquisition restarts
+HUNG_AFTER_S = 15.0                      # a connected child silent this long is hung
+
 
 def late_preview(late_after_samples: int, sample_hz: float) -> str:
     """The Late-after setting in seconds, e.g. '= 3.0 s at 1 Hz'."""

@@ -1,6 +1,6 @@
 # 14: Escalation core: which recovery step comes next
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Runner:** any
 
@@ -25,7 +25,7 @@ dataclass for the answer and a class that takes `now` on every event.
 Tests in `tests/test_escalation.py` drive a real `Escalation` with explicit `now`
 values; nothing is faked.
 
-- [ ] `config.py` gains `RETRY_INTERVAL_S = 5.0`, `TRIES_PER_STEP = 3`,
+- [x] `config.py` gains `RETRY_INTERVAL_S = 5.0`, `TRIES_PER_STEP = 3`,
   `ACQUISITION_RESTART_INTERVAL_S = 30.0`, `HUNG_AFTER_S = 15.0`. `escalation.py`
   defines `Step` (values `"Reopen"`, `"Library reset"`, `"Acquisition restart"`),
   frozen `Attempt(step, number, of, total, hand_off)` (`of` is `TRIES_PER_STEP` for
@@ -33,7 +33,7 @@ values; nothing is faked.
   `lost(now, retry_now)`, `due(now) -> Attempt | None`, `failed(now, reason)`,
   `hung(now)`, `recovered(now) -> Step | None`, `reset()`, and properties
   `climbing`, `hand_off`, `in_flight`.
-- [ ] Test `test_full_climb_order_and_timing`: `lost(0, retry_now=True)`, then
+- [x] Test `test_full_climb_order_and_timing`: `lost(0, retry_now=True)`, then
   repeatedly call `due(t)` and, whenever it returns an Attempt, `failed(t, "1298")`,
   stepping `t` by 1 s up to 130 s. The Attempts returned, as `(t, step.value, number,
   total)`, are exactly: (0, Reopen, 1, 1), (5, Reopen, 2, 2), (10, Reopen, 3, 3),
@@ -41,14 +41,14 @@ values; nothing is faked.
   (30, Acquisition restart, 1, 7), (60, Acquisition restart, 2, 8),
   (90, Acquisition restart, 3, 9), (120, Acquisition restart, 4, 10). `due` returns
   `None` while an Attempt is in flight (before `failed`) and at every other second.
-- [ ] Test `test_hand_off_starts_after_first_restart_fails`: in the climb above,
+- [x] Test `test_hand_off_starts_after_first_restart_fails`: in the climb above,
   `hand_off` is `False` up to and including the Attempt at t=30, `True` from the
   `failed` call at t=30 onward, and every later Attempt has `hand_off=True`.
-- [ ] Test `test_connect_failure_waits_five_seconds`: `lost(0, retry_now=False)` →
+- [x] Test `test_connect_failure_waits_five_seconds`: `lost(0, retry_now=False)` →
   `due(4.9)` is `None`, `due(5.0)` is `Attempt(Reopen, 1, 3, 1, False)`.
   Test `test_hung_jumps_to_restart`: after `lost(0, True)` and Reopen #1 in flight,
   `hung(3)` → `due(3)` is an Acquisition restart Attempt with `number=1`, `total=2`.
-- [ ] Test `test_recovery_reports_step_and_resets`: climb to Library reset #2 in
+- [x] Test `test_recovery_reports_step_and_resets`: climb to Library reset #2 in
   flight, `recovered(22)` returns `Step.LIBRARY_RESET`; afterwards `climbing` and
   `hand_off` are `False`, `due(100)` is `None`, and a new `lost(200, True)` makes
   `due(200)` return `Attempt(Reopen, 1, 3, 1, False)`. `recovered` when not
@@ -64,3 +64,7 @@ Run in CI's order (`.github/workflows/ci.yml`):
 3. `pytest -q`
 
 ## Comments
+
+2026-10-07 — Implemented `src/ibl/escalation.py` (`Step`, `Attempt`, `Escalation`) and the four
+constants in `config.py`. `tests/test_escalation.py` covers every criterion: full climb timing
+and totals, Hand-off timing, Connect-failure delay, hung jump, recovery/reset. No bench work needed.
