@@ -46,7 +46,8 @@ from .config import WINDOW_POLL_MS, Settings
 from .csvlogger import DailyCsvLogger, load_recent_history
 from .escalation import Attempt, Step
 from .history import History
-from .link import LinkMonitor, LinkState
+from .link import LinkMonitor, LinkState, Recovery
+from .linklog import LinkLog
 from .model import Sample
 from .supervisor import Down, NewSample, ReadError, Reconnecting, Supervisor, Up
 from .theme import DARK_THEME, LIGHT_THEME
@@ -68,6 +69,10 @@ class MainWindow(QMainWindow):
         self._last_csv = 0.0
         self._now = time.time                   # the clock; tests replace it
         self.link = LinkMonitor(settings.late_after_samples, settings.sample_hz)
+        self.linklog = LinkLog(settings.csv_dir)  # the permanent record of every Link event
+        self._hand_off_logged = False            # HAND_OFF is written once per loss
+        self._last_read_error = ""               # set by a read error, cleared by a Sample
+        self._stopped = False                    # closeEvent has run
         self._last_sample: Sample | None = None  # newest Sample, for the STALE display
         self._last_sample_now = 0.0              # window clock when it arrived
         self._driver_msg = ""                    # LJM-missing text, shown only while DOWN
@@ -86,6 +91,7 @@ class MainWindow(QMainWindow):
 
         self._reload_history_from_csv()
         self._start_supervisor_timer()
+        self._log("APP_START", f"IBL Pressure v{__version__}")
 
         # Ages the status line and the STALE table even when no event arrives.
         self._link_timer = QTimer(self, interval=500)
@@ -175,6 +181,7 @@ class MainWindow(QMainWindow):
         self.link.configure(s.late_after_samples, s.sample_hz)
         self._render_link()
         self.logger.reconfigure(s.csv_dir, s.csv_include_voltages)
+        self.linklog.reconfigure(s.csv_dir)
         self._apply_appearance()
         # The child gets a copy, never self.settings (AGENTS.md rule 2).
         self.supervisor.update_settings(self._now(), dataclasses.replace(s))
@@ -234,7 +241,8 @@ class MainWindow(QMainWindow):
             if isinstance(event, NewSample):
                 self._on_sample(event.sample)
             elif isinstance(event, Up):
-                self._on_link_up(event.description, event.recovered_by)
+                self._on_link_up(event.description, event.recovered_by, event.ljm_version,
+                                 event.firmware, event.warning)
             elif isinstance(event, Down):
                 self._on_link_down(event.reason, event.attempt)
             elif isinstance(event, Reconnecting):
@@ -248,21 +256,61 @@ class MainWindow(QMainWindow):
             self._link_wanted = False
             self.link.disconnect_requested(now)
             self.supervisor.disconnect(now)
+            self._hand_off_logged = False
+            self._log("DISCONNECT")
             self.topbar.btn_connect.setText("Connect")
         else:
             self._link_wanted = True
             self.link.connect_requested(now)
+            self._hand_off_logged = False
+            self._last_read_error = ""
+            self._log("CONNECT", self._connection_text())
             self.topbar.btn_connect.setText("Disconnect")
             self.supervisor.connect(now, dataclasses.replace(self.settings))
         self._render_link()
 
-    # -- Link events: forwarded to LinkMonitor, then one redraw ---------------
-    def _on_link_up(self, description: str, recovered_by: Step | None = None) -> None:
+    # -- Link log
+    def _log(self, kind: str, detail: str = "", **kwargs) -> None:
+        """Write one Link log line. A failure shows on the status line (see _render_link)."""
+        self.linklog.record(self._now(), kind, detail, **kwargs)
+
+    def _connection_text(self) -> str:
+        s = self.settings
+        text = f"{s.connection} {s.identifier} · {s.sample_hz:g} Hz"
+        return f"Simulation · {text}" if s.simulate else text
+
+    @staticmethod
+    def _attempt_text(attempt: Attempt) -> str:
+        of = "" if attempt.of is None else f" of {attempt.of}"
+        return f"{attempt.step.value} (attempt {attempt.number}{of})"
+
+    def _log_hand_off(self, attempt: Attempt | None) -> None:
+        if attempt is not None and attempt.hand_off and not self._hand_off_logged:
+            self._hand_off_logged = True
+            self._log("HAND_OFF", f"automatic recovery still trying (attempt {attempt.total}); "
+                                  "the operator is asked to check the cable, replug the T7, "
+                                  "then reboot the PC")
+
+    # -- Link events: forwarded to LinkMonitor and the Link log, then one redraw ----------
+    def _on_link_up(self, description: str, recovered_by: Step | None = None,
+                    ljm_version: str = "", firmware: str = "", warning: str = "") -> None:
         self.link.link_up(self._now(), description, recovered_by)
+        parts = [description]
+        if ljm_version:
+            parts.append(f"LJM {ljm_version}")
+        if firmware:
+            parts.append(f"firmware {firmware}")
+        parts.append(self._connection_text())
+        if warning:
+            parts.append(f"WARNING {warning}")
+        self._log("LINK_UP", " · ".join(parts))
         self._render_link()
 
     def _on_link_down(self, reason: str, attempt: Attempt | None = None) -> None:
         self.link.link_down(self._now(), reason, attempt)
+        self._log_hand_off(attempt)
+        detail = reason if attempt is None else f"{reason} · {self._attempt_text(attempt)}"
+        self._log("LINK_DOWN", detail, fold_key=reason)
         # If the link is down because the LJM driver is missing, the driver
         # check owns the status line (and shows the Install button).
         if not self.settings.simulate:
@@ -271,10 +319,16 @@ class MainWindow(QMainWindow):
 
     def _on_reconnecting(self, attempt: Attempt) -> None:
         self.link.reconnecting(self._now(), attempt)
+        if attempt.total == 1 and self._last_read_error:
+            self._log("LOST", f"3 reads in a row failed · last error: {self._last_read_error}")
+        self._log_hand_off(attempt)
+        self._log("RECONNECTING", self._attempt_text(attempt), fold_key=attempt.step.value)
         self._render_link()
 
     def _on_read_error(self, message: str) -> None:
         self.link.read_error(self._now(), message)
+        self._last_read_error = message
+        self._log("READ_ERROR", message, fold_key=message)
         self._render_link()
 
     def _render_link(self) -> None:
@@ -289,6 +343,8 @@ class MainWindow(QMainWindow):
             text = self._driver_msg
         if self._settings_problem:
             text = f"{self._settings_problem} · {text}"
+        if self.linklog.last_error:
+            text = f"{self.linklog.last_error} · {text}"
         self.topbar.show_link(view.dot_color, text, view.detail)
         if view.state is not LinkState.LIVE and self._last_sample is not None:
             self.table_panel.show_stale(self._last_sample,
@@ -297,7 +353,11 @@ class MainWindow(QMainWindow):
     # -- New data
     def _on_sample(self, sample: Sample) -> None:
         now = self._now()
-        self.link.sample(now)
+        recovery = self.link.sample(now)
+        self._last_read_error = ""
+        if recovery is not None:
+            self._hand_off_logged = False
+            self._log_recovery(recovery)
         self._last_sample = sample
         self._last_sample_now = now
         self.table_panel.show_sample(sample)
@@ -306,6 +366,12 @@ class MainWindow(QMainWindow):
         if self.plot_panel.redraw_due(now, self.settings.sample_hz):
             self._redraw_plot()
         self._render_link()
+
+    def _log_recovery(self, recovery: Recovery) -> None:
+        if recovery.step is None:
+            self._log("RECOVERED", f"gap {recovery.gap_s:.0f} s")
+        else:
+            self._log("RECOVERED", step=recovery.step.value, gap_s=recovery.gap_s)
 
     def _pressure_row(self, sample: Sample) -> np.ndarray:
         row = np.full(len(CHANNELS), np.nan)
@@ -347,11 +413,16 @@ class MainWindow(QMainWindow):
         self._redraw_plot()
 
     def closeEvent(self, event) -> None:
+        if self._stopped:
+            super().closeEvent(event)
+            return
+        self._stopped = True
         problem = self._harvest_panels().save()
         if problem:
             print(problem, file=sys.stderr)  # the window is closing; stderr is all we have
         # Never waits on LJM: the Supervisor asks the child to quit, then terminates, then kills.
         self._poll_timer.stop()
         self.supervisor.shutdown()
+        self._log("APP_STOP")
         self.logger.close()
         super().closeEvent(event)
