@@ -126,6 +126,16 @@ text is generated from the same constants the app uses, so it stays correct when
 settings change. Hover over the light, the status line, the plot caption, *Late after*
 or the CSV size for a short explanation.
 
+**If the connection drops** the app gets it back on its own, one step at a time:
+**Reopen** (3 tries), then **Library reset** (3 tries), then **Acquisition restart**
+(a fresh reading process, repeated every 30 s). The status line names the step. If
+the first Acquisition restart fails the light is red and says *T7 not responding*:
+check the USB cable to the T7, unplug and replug the T7, then reboot the PC. The app
+keeps trying meanwhile. The T7 also restarts itself after 60 s without contact. Every
+loss and recovery is written to `link-log/YYYY-MM.log` next to the CSV files (one file
+per month, kept forever); the **Connection** box in Settings shows today's recoveries
+and the last 20 lines, and **Open Link log** opens the folder.
+
 ---
 
 ## Code layout
@@ -135,11 +145,15 @@ src/ibl/
   channels.py    — AIN → location / gauge type
   conversion.py  — volts → Torr, fault rules
   csvlogger.py   — daily CSV rotation
-  daq.py         — DaqWorker (separate QThread, auto-reconnects on failure)
+  acquisition.py — the whole T7 conversation, no Qt; runs in a child process
+  supervisor.py  — owns the child process, drives Escalation, restarts the child
+  escalation.py  — which recovery step comes next (Reopen / Library reset / Acquisition restart)
+  link.py        — LinkMonitor: the one place that decides the Link state and status text
+  linklog.py     — the Link log: monthly files of every Link event, folded repeats
   config.py      — Settings dataclass, settings.json load/save
   driver.py      — LJM driver check + one-click installer launch
   help_text.py   — the Help text (Qt-free, built from the real constants)
-  mainwindow.py  — the single PySide6 window: wires the panels to worker, link, history, CSV
+  mainwindow.py  — the single PySide6 window: wires the panels to the Supervisor, link, history, CSV, Link log
   ui/            — the panels, widgets only
     widgets.py       CompactSpin, TorrAxis
     topbar.py        TopBar: connect, simulation, dark mode, dot, status, CSV label

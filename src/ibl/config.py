@@ -35,6 +35,22 @@ MAX_LATE_AFTER_SAMPLES = 20
 MIN_CSV_INTERVAL_S = 1.0
 MAX_CSV_INTERVAL_S = 3600.0
 
+# --- Link recovery rules (Escalation). Rules, not settings: the operator cannot edit them. ---
+RETRY_INTERVAL_S = 5.0                   # between tries inside Reopen / Library reset
+TRIES_PER_STEP = 3                       # Reopen and Library reset try this many times
+ACQUISITION_RESTART_INTERVAL_S = 30.0    # between Acquisition restarts
+HUNG_AFTER_S = 15.0                      # a connected child silent this long is hung
+
+WATCHDOG_TIMEOUT_S = 60                  # the T7 restarts itself after this long without the app
+STOP_TIMEOUT_S = 2.0                     # the window waits this long for a clean child exit
+KILL_JOIN_S = 0.5                        # then this long after terminate, before kill
+WINDOW_POLL_MS = 100                     # how often the window asks the Supervisor for news
+HEARTBEAT_S = 1.0                        # the acquisition child says it is alive this often
+
+# --- Link log ---
+LINK_LOG_FOLD_S = 600.0                  # repeats of one (kind, key) inside this window fold
+CONNECTION_FRAME_EVENTS = 20             # Link log lines the Connection frame shows
+
 
 def late_preview(late_after_samples: int, sample_hz: float) -> str:
     """The Late-after setting in seconds, e.g. '= 3.0 s at 1 Hz'."""

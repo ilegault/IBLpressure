@@ -1,16 +1,23 @@
 """Headless Qt works: the main window builds in Simulation mode."""
 import pytest
+from test_supervisor import Spawner
 
 from ibl import config
+from ibl.acquisition import ApplySettings
 from ibl.config import Settings
 from ibl.mainwindow import MainWindow
+from ibl.supervisor import Supervisor
 
 
 @pytest.fixture
-def window(qtbot, tmp_path, monkeypatch):
+def spawn():
+    return Spawner()
+
+
+@pytest.fixture
+def window(qtbot, tmp_path, monkeypatch, spawn):
     # A fixture, not a local variable: pytest keeps the window alive until qtbot closes it
-    # at teardown. A window garbage-collected earlier is destroyed with its worker thread
-    # still running, which aborts the process.
+    # at teardown, so its timers never outlive it.
     path = str(tmp_path / "settings.json")
     monkeypatch.setattr(config, "SETTINGS_PATH", path)
     # Settings.save/load take SETTINGS_PATH as a default argument, bound when the
@@ -18,7 +25,8 @@ def window(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(Settings.save, "__defaults__", (path,))
     monkeypatch.setattr(Settings.load.__func__, "__defaults__", (path,))
 
-    window = MainWindow(Settings(simulate=True, csv_enabled=False))
+    window = MainWindow(Settings(simulate=True, csv_enabled=False),
+                        supervisor=Supervisor(spawn=spawn))
     qtbot.addWidget(window)
     return window
 
@@ -26,20 +34,22 @@ def window(qtbot, tmp_path, monkeypatch):
 def test_window_opens_in_simulation(window):
     assert window.topbar.lbl_status.text() == "Not connected. Press Connect."
     assert "#999999" in window.topbar.lbl_link.styleSheet()
-    # No explicit window.close(): qtbot.addWidget closes it at teardown. A second close
-    # would hang, because closeEvent makes a blocking call into a worker thread that the
-    # first close already stopped.
+    # No explicit window.close(): qtbot.addWidget closes it at teardown.
 
 
-def test_window_and_worker_do_not_share_settings(window):
-    assert window.worker._settings is not window.settings
+def test_window_and_worker_do_not_share_settings(window, spawn):
+    window._toggle_connection()                      # the acquisition child gets a copy
+    assert spawn.settings[0] is not window.settings
+    assert spawn.children[0].sent[0].settings is not window.settings
 
 
-def test_settings_change_reaches_worker_as_a_copy(window, qtbot):
+def test_settings_change_reaches_worker_as_a_copy(window, spawn):
+    window._toggle_connection()
     window.topbar.chk_sim.setChecked(not window.settings.simulate)
 
-    qtbot.waitUntil(lambda: window.worker._settings.simulate == window.settings.simulate)
-    assert window.worker._settings is not window.settings
+    sent = [c for c in spawn.children[0].sent if isinstance(c, ApplySettings)]
+    assert sent[-1].settings.simulate == window.settings.simulate
+    assert sent[-1].settings is not window.settings
 
 
 def test_spin_ranges_come_from_config(window):

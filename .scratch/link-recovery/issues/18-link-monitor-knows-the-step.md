@@ -1,6 +1,6 @@
 # 18: LinkMonitor names the Escalation step
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Runner:** any
 
@@ -27,25 +27,25 @@ Tests in `tests/test_link.py` drive a real `LinkMonitor` with explicit `now` and
 hand-built `Attempt`s from `ibl.escalation`; window tests in
 `tests/test_window_link.py` use the existing `window` fixture and fake clock.
 
-- [ ] Signatures: `reconnecting(now, attempt: Attempt)`,
+- [x] Signatures: `reconnecting(now, attempt: Attempt)`,
   `link_down(now, reason, attempt: Attempt | None = None)`,
   `link_up(now, description, recovered_by: Step | None = None)`, and
   `sample(now) -> Recovery | None` where frozen `Recovery(gap_s, step)` is returned
   only on the Sample that ends a Gap. Rewrite `test_reconnecting_text` and the test
   asserting `T7 not found: no device. Retrying every 5 s.` in place to the new texts.
-- [ ] Tests assert every row of the spec's status-text table verbatim, one test per
+- [x] Tests assert every row of the spec's status-text table verbatim, one test per
   row (`Reconnecting — Library reset (attempt 2 of 3)…`,
   `T7 not found: 1298. Acquisition restart (attempt 2) failed; next try in 30 s.`,
   `T7 not found: no device. Next try in 5 s.`, the Hand-off text with
   `attempt 9` and dot `#d62728` both while in flight and after failure, and
   `Live · Recovered at {stamp} after a 42 s gap (Library reset)`), plus that a
   Recovery with no Escalation keeps the old text with no parentheses.
-- [ ] `LinkView.detail` is the latest `link_down` reason or read error while the
+- [x] `LinkView.detail` is the latest `link_down` reason or read error while the
   state is not Live, and `""` when Live or Idle. Test in `tests/test_window_link.py`:
   after `window._on_link_down("1298 LJME_ATTR_LOAD_COMM_FAILURE")` and a render,
   `window.topbar.lbl_status.toolTip()` contains that text; after a Live Sample it
   does not.
-- [ ] Until ticket 20, `MainWindow._on_reconnecting(attempt: int)` passes
+- [x] Until ticket 20, `MainWindow._on_reconnecting(attempt: int)` passes
   `Attempt(Step.REOPEN, attempt, TRIES_PER_STEP, attempt, False)` and
   `_on_link_down(reason)` passes no Attempt, each with a comment `# replaced in
   ticket 20`. Existing tests in `tests/test_window_link.py` and
@@ -60,3 +60,12 @@ Run in CI's order (`.github/workflows/ci.yml`):
 3. `pytest -q`
 
 ## Comments
+
+2026-10-07 — `LinkMonitor` now takes `Attempt`s and `recovered_by`, returns `Recovery` from
+`sample`, and `LinkView.detail` carries the latest LabJack error while Late/Down. The top bar's
+`show_link` adds it to the status line's tooltip. Texts are asserted verbatim, one test per row of
+the spec table, in `tests/test_link.py`; window tests in `tests/test_window_link.py`.
+`MainWindow._on_reconnecting` / `_on_link_down` adapted with `# replaced in ticket 20`.
+Note for ticket 19: the Hand-off text needs `Attempt.hand_off` True on the *failed* first
+Acquisition restart, so the Supervisor passes `dataclasses.replace(attempt, hand_off=esc.hand_off)`
+to `Down` after calling `Escalation.failed`.

@@ -1,6 +1,6 @@
 # 20: Window runs on the Supervisor; retire the QThread worker
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Runner:** any
 
@@ -32,20 +32,20 @@ Window tests use the `window` fixture pattern of `tests/test_window_link.py`, wi
 optional argument; production passes nothing). May fake: the child handle and the
 clock. Must be real: `MainWindow`, `Supervisor`, `LinkMonitor`.
 
-- [ ] Test `test_connect_goes_live_through_supervisor`: press Connect
+- [x] Test `test_connect_goes_live_through_supervisor`: press Connect
   (`window._toggle_connection()`), the fake child sends `LinkUp` and a `SampleReady`,
   call `window._poll_supervisor()` → dot `#2ca02c`, status starts `Live ·`, and the
   table shows numbers.
-- [ ] Test `test_escalation_shows_on_status_line`: fake child sends `Lost("timeout")`
+- [x] Test `test_escalation_shows_on_status_line`: fake child sends `Lost("timeout")`
   → after a poll and render, status reads `Reconnecting — Reopen (attempt 1 of 3)…`;
   after `LinkUp` and a Sample, it starts `Live · Recovered at` and ends `(Reopen)`.
-- [ ] Test `test_quit_never_waits_on_a_stuck_child`: a fake child whose `join` leaves
+- [x] Test `test_quit_never_waits_on_a_stuck_child`: a fake child whose `join` leaves
   it alive → `window.close()` returns, the fake got `kill()`, and the window has no
   `thread` or `worker` attribute.
-- [ ] Test `test_settings_change_reaches_child_as_copy`: changing the sample rate in
+- [x] Test `test_settings_change_reaches_child_as_copy`: changing the sample rate in
   the settings panel sends `ApplySettings(s)` where `s is not window.settings` and
   `s.sample_hz` is the new value.
-- [ ] `grep -rn "DaqWorker\|QThread\|BlockingQueuedConnection" src main.py` finds
+- [x] `grep -rn "DaqWorker\|QThread\|BlockingQueuedConnection" src main.py` finds
   nothing; `main.py` calls `multiprocessing.freeze_support()`; module docstrings of
   `mainwindow.py` and `supervisor.py` describe the new flow. Full gate green.
 
@@ -58,3 +58,15 @@ Run in CI's order (`.github/workflows/ci.yml`):
 3. `pytest -q`
 
 ## Comments
+
+2026-10-07 — `MainWindow(settings, supervisor=None)` now polls a `Supervisor` every
+`WINDOW_POLL_MS` (new in `config.py`) and routes its events to the existing slots, with the
+Attempt and `recovered_by`; the ticket-18 shims are gone. `closeEvent` calls `shutdown()`;
+`src/ibl/daq.py` is deleted; `main.py` calls `multiprocessing.freeze_support()`.
+Tests: `tests/test_window_supervisor.py` (new, covers each criterion plus one real spawned child
+driving the real window); the two `test_window_smoke.py` tests that read `window.worker._settings`
+were rewritten in place (same names) against the child's `Start`/`ApplySettings`; the
+ticket-18 `test_reconnecting_signal_still_reads_as_a_reopen` now passes an `Attempt`.
+Note: the ticket's "window has no `thread` attribute" cannot be asserted literally because
+`QObject.thread()` always exists; the test asserts no `QThread` child and no `worker` instead.
+Bench (ticket 25): the PyInstaller exe must start the child (`freeze_support`).

@@ -1,13 +1,14 @@
 """The Help text is built from the real constants, so it cannot drift from the app."""
 import re
 
-from ibl import help_text
+from ibl import config, help_text
 from ibl.config import MAX_HISTORY_S, MAX_SAMPLE_HZ, Settings
 from ibl.help_text import help_html
 
 SECTIONS = [
     "Status light",
     "When data is late",
+    "When the connection drops",
     "Gauge status colours",
     "The plot at long time spans",
     "CSV log files",
@@ -64,3 +65,40 @@ def test_settings_limits_come_from_config():
     text = _plain(help_html(Settings()))
     assert f"{MAX_SAMPLE_HZ:g} Hz" in text
     assert f"{MAX_HISTORY_S // 3600} h" in text
+
+
+def test_connection_drops_section_explains_escalation():
+    text = _plain(help_html(Settings()))
+    for phrase in ("When the connection drops", "Reopen", "Library reset",
+                   "Acquisition restart", "unplug and replug the T7", "link-log",
+                   "Connection", "Open Link log"):
+        assert phrase in text, phrase
+
+
+def test_connection_drops_numbers_come_from_config(monkeypatch):
+    monkeypatch.setattr(config, "ACQUISITION_RESTART_INTERVAL_S", 45.0)
+    monkeypatch.setattr(config, "WATCHDOG_TIMEOUT_S", 90)
+    monkeypatch.setattr(config, "RETRY_INTERVAL_S", 7.0)
+    monkeypatch.setattr(config, "TRIES_PER_STEP", 4)
+    monkeypatch.setattr(config, "HUNG_AFTER_S", 21.0)
+    text = _plain(help_html(Settings()))
+    assert "45 s" in text and "90 s" in text and "7 s" in text and "21 s" in text
+    assert "4 tries" in text
+    assert "30 s" not in text and "60 s" not in text        # no hard-coded defaults
+
+
+def test_default_numbers_are_the_real_defaults():
+    text = _plain(help_html(Settings()))
+    assert "30 s" in text and "60 s" in text and "5 s" in text and "15 s" in text
+    assert "3 tries" in text
+
+
+def test_down_bullet_no_longer_promises_a_fixed_retry():
+    assert "retries every 5 s" not in _plain(help_html(Settings()))
+
+
+def test_hand_off_text_in_help_matches_the_status_line():
+    # The status line and the Help give the same three by-hand actions, in the same order.
+    text = _plain(help_html(Settings()))
+    assert text.index("check the USB cable") < text.index("unplug and replug the T7")
+    assert text.index("unplug and replug the T7") < text.index("reboot this PC")

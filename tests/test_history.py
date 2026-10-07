@@ -163,10 +163,10 @@ def test_decimate_ignores_nan_points_and_empty_input():
     # All-NaN data: every point is filtered out by the finite check → empty output.
     t = np.arange(5, dtype=float)
     p = np.full(5, np.nan)
-    t_out, p_out = minmax_decimate(t, p, p, 0.0, 5.0, 2, gap_s=1e9)
+    t_out, _p_out = minmax_decimate(t, p, p, 0.0, 5.0, 2, gap_s=1e9)
     assert len(t_out) == 0
     # Completely empty input → also empty output (no per-bucket NaN any more).
-    t_out, p_out = minmax_decimate(np.array([]), np.array([]), np.array([]), 0.0, 5.0, 2, 1e9)
+    t_out, _p_out = minmax_decimate(np.array([]), np.array([]), np.array([]), 0.0, 5.0, 2, 1e9)
     assert len(t_out) == 0
 
 

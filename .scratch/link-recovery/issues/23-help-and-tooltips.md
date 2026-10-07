@@ -1,6 +1,6 @@
 # 23: Help and tooltips explain Escalation, the watchdog and the Link log
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Runner:** any
 
@@ -28,12 +28,12 @@ tooltip in `src/ibl/ui/topbar.py` and the README's operator section to match.
 Tests in `tests/test_help_text.py` call `help_html(Settings())` directly and patch
 `config` constants with `monkeypatch` to prove the text is built from them.
 
-- [ ] `help_html` contains `When the connection drops`, `Reopen`, `Library reset`,
+- [x] `help_html` contains `When the connection drops`, `Reopen`, `Library reset`,
   `Acquisition restart`, `unplug and replug the T7` and `link-log`.
-- [ ] With `ACQUISITION_RESTART_INTERVAL_S` patched to 45 and `WATCHDOG_TIMEOUT_S` to
+- [x] With `ACQUISITION_RESTART_INTERVAL_S` patched to 45 and `WATCHDOG_TIMEOUT_S` to
   90, the text contains `45 s` and `90 s` (no hard-coded 30/60).
-- [ ] The text no longer contains `retries every 5 s`.
-- [ ] `window.topbar.lbl_link.toolTip()` mentions automatic recovery and the
+- [x] The text no longer contains `retries every 5 s`.
+- [x] `window.topbar.lbl_link.toolTip()` mentions automatic recovery and the
   Connection frame.
 
 ## Gate
@@ -45,3 +45,9 @@ Run in CI's order (`.github/workflows/ci.yml`):
 3. `pytest -q`
 
 ## Comments
+
+2026-10-07 — `help_html` has a new section **When the connection drops** built from `config`
+constants at call time (so tests can patch them); the Down bullet no longer says "retries every 5 s";
+the status-dot tooltip mentions automatic recovery and the Connection box; the README's operator
+section and code layout are updated. Tests: `tests/test_help_text.py` (the section-order test gained
+the new heading in place) and `tests/test_window_link.py`.

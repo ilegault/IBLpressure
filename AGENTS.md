@@ -73,23 +73,27 @@ T7.
 |---|---|---|---|
 | Wiring | `channels.py` | `Channel`, `CHANNELS`, the IG/CG pair of each location | no |
 | Physics | `conversion.py` | volts → Torr, `GaugeStatus` per reading | no |
-| Model | `model.py` (ticket 03) | `Reading`, `Sample` | no |
-| Settings | `config.py` | `Settings`, its limits, load/save | no |
-| Link | `link.py` (ticket 05) | `LinkMonitor`: Link state, Freshness, status text | no |
-| History | `history.py` (ticket 07) | two-tier History, min/max decimation | no |
+| Model | `model.py` | `Reading`, `Sample` | no |
+| Settings | `config.py` | `Settings`, its limits and the recovery timings, load/save | no |
+| Link | `link.py` | `LinkMonitor`: Link state, Freshness, status text | no |
+| Escalation | `escalation.py` | which recovery step comes next: Reopen → Library reset → Acquisition restart | no |
+| History | `history.py` | two-tier History, min/max decimation | no |
 | CSV | `csvlogger.py` | daily file, append safety, size estimate, reload | no |
+| Link log | `linklog.py` | the permanent monthly Link log, folded repeats, summary | no |
 | Driver | `driver.py` | LJM present? bundled installer | no |
-| Acquisition | `daq.py` | `DaqWorker` on its own `QThread` | yes |
-| Window | `mainwindow.py` + `ui/` panels (ticket 11) | widgets only | yes |
+| Acquisition | `acquisition.py` | the whole T7 conversation (open, AINs, Device watchdog, read, Library reset, Simulation); runs in a **child process** | no |
+| Supervisor | `supervisor.py` | owns the child process and the Escalation; turns child messages into window events | no |
+| Help and theme | `help_text.py`, `theme.py` | the Help text (built from real constants), colour palettes | no |
+| Window | `mainwindow.py` + `ui/` panels | widgets only; polls the Supervisor every `WINDOW_POLL_MS` | yes |
 
 Rules:
 
 1. **A core never imports `PySide6` or `pyqtgraph`, never reads `time.time()`,
    never touches the filesystem unless file I/O is its job (`csvlogger`, `config`).**
    Pass `now` in.
-2. **Threads never share a mutable object.** The acquisition worker receives a
-   *copy* of `Settings` (`dataclasses.replace`) every time settings change. Never
-   hand it `self.settings`.
+2. **Processes never share a mutable object.** The acquisition child receives a
+   *copy* of `Settings` (`dataclasses.replace`) in `Start` / `ApplySettings` every time
+   settings change. Never hand it `self.settings`.
 3. **One state, one place.** The status dot and the status text are both drawn
    from one `LinkView` returned by `LinkMonitor.view(now)`. No other code sets the
    dot's colour or the status text.
@@ -107,6 +111,10 @@ Rules:
 8. **Behaviour the operator relies on is explained in the app**, not only in the
    repo: tooltips, plot captions and the Help dialog (ticket 12). When a ticket
    changes such behaviour it updates the in-app text too.
+9. **Only `acquisition.py` calls LJM, and the window never waits on it.** No
+   `BlockingQueuedConnection`, no unbounded `join`: stopping the child is bounded by
+   `STOP_TIMEOUT_S` (quit, then terminate, then kill). The child never retries on its
+   own; only the Supervisor, through Escalation, decides what happens next (ADR 0003).
 
 ---
 
@@ -115,10 +123,14 @@ Rules:
 - Tests first, watched failing, then the code.
 - Test cores directly with plain data and an explicit `now`.
 - Qt tests use `pytest-qt`'s `qtbot` with `QT_QPA_PLATFORM=offscreen` and
-  `Settings(simulate=True)`. Never a real T7, never LJM.
+  `Settings(simulate=True)`. Never a real T7, never LJM. Window tests build
+  `MainWindow(settings, supervisor=Supervisor(spawn=<FakeChild factory>))`.
 - **May fake:** the clock (pass `now`), the LJM module (a fake object with
-  `eReadNames` etc.), the worker's signals. **Must be real:** the core under
-  change, and any file under change (use `tmp_path`).
+  `eReadNames` etc.), the child handle (`FakeChild` in `tests/test_supervisor.py`).
+  **Must be real:** the core under change, and any file under change (use `tmp_path`).
+- Only the real Simulation-mode process tests spawn a process:
+  `tests/test_supervisor.py::test_real_child_streams_simulated_samples` and its
+  window-level twin in `tests/test_window_supervisor.py`. Everything else fakes the child.
 - Assert what the operator would see: cell text, dot colour, status text, the
   file written, the number of points handed to a curve.
 - No `skip`, `skipif` or `xfail`. No loosened tolerances without a physical reason

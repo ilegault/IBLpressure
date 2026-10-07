@@ -1,6 +1,6 @@
 # 16: Acquisition core: the T7 conversation, Qt-free
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Runner:** any
 
@@ -31,28 +31,28 @@ drive `Acquisition` directly with the `FakeLjm` already in that file (extend it 
 `readLibraryConfigS` and `eReadName`) and an explicit `now`. May fake: the LJM
 module. Must be real: `Acquisition`.
 
-- [ ] Events per command: `Start(Settings(simulate=True))` → `[LinkUp("Simulation mode",
+- [x] Events per command: `Start(Settings(simulate=True))` → `[LinkUp("Simulation mode",
   "", "", "")]`; `Start` on the fake T7 → `[LinkUp("T7 #470012345 over USB",
   <LJM version string>, <firmware string>, "")]`; a failing `openS` →
   `[LinkDown("no device")]`. `Reopen()` closes then opens; `LibraryReset()` calls
   `closeAll` (assert the fake counted it) then opens. Rewritten
   `test_failed_open_reports_link_down` etc. assert these lists exactly.
-- [ ] `tick(now)` at the sample interval returns `[SampleReady(sample)]` with 14
+- [x] `tick(now)` at the sample interval returns `[SampleReady(sample)]` with 14
   Readings; rewritten `test_failed_read_emits_read_error_then_reconnects_after_three`
   asserts two ticks give `[ReadError("timeout")]` each and the third gives
   `[ReadError("timeout"), Lost("timeout")]`, after which the fake's `close` was
   called and further ticks return no `SampleReady` and no `openS` call (no
   self-retry). `test_retry_when_not_connected_announces_attempt` is rewritten in
   place to assert that a closed `Acquisition` never calls `openS` from `tick`.
-- [ ] `tick` returns `Alive()` whenever `HEARTBEAT_S = 1.0` (new constant in
+- [x] `tick` returns `Alive()` whenever `HEARTBEAT_S = 1.0` (new constant in
   `config.py`) has passed since the last event it returned, connected or not.
-- [ ] `ApplySettings` with a changed `connection`, `identifier`, `resolution_index`
+- [x] `ApplySettings` with a changed `connection`, `identifier`, `resolution_index`
   or `simulate` closes and reopens (events as for `Reopen`); a changed `sample_hz`
   only changes the read interval (no `openS` call). `Quit()` closes and calls
   `closeAll`, and `run` returns. Test `test_run_loop_exits_on_quit` feeds
   `queue.Queue`s in-process: `Start(simulate)`, then `Quit()`; `run` returns and the
   event queue held a `LinkUp` and at least one `SampleReady`.
-- [ ] Test `test_acquisition_imports_no_qt` runs
+- [x] Test `test_acquisition_imports_no_qt` runs
   `python -c "import sys, ibl.acquisition; print('PySide6' in sys.modules)"` in a
   subprocess with `src` on `PYTHONPATH` and asserts it prints `False`. All events
   and commands round-trip through `pickle`.
@@ -66,3 +66,11 @@ Run in CI's order (`.github/workflows/ci.yml`):
 3. `pytest -q`
 
 ## Comments
+
+2026-10-07 — Implemented `src/ibl/acquisition.py` (messages, `Acquisition`, `run`) and
+`HEARTBEAT_S` in `config.py`; `_Simulator` moved there (it now takes `now`) and `daq.py`
+imports it. `tests/test_daq.py` rewritten in place against `Acquisition` with an extended
+`FakeLjm`; it covers events per command, 3-reads-then-Lost with no self-retry, heartbeat,
+ApplySettings relink rules, Quit/closeAll, the in-process `run` loop, no-Qt import and pickling.
+The first Sample is due on the first tick after an open. Close and closeAll failures are logged
+(not swallowed); a failed closeAll in a Library reset rides on `LinkUp.warning`.
