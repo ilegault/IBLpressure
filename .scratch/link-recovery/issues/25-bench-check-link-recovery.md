@@ -1,6 +1,6 @@
 # 25: Bench check: recovery on the beamline T7 and the exe
 
-**Status:** ready-for-developer
+**Status:** done
 
 **Runner:** developer
 
@@ -20,19 +20,19 @@ right afterwards.
 
 ## Acceptance criteria
 
-- [ ] `build.bat` completes, `verify_build.py` passes, `dist\IBLpressure\IBLpressure.exe`
+- [x] `build.bat` completes, `verify_build.py` passes, `dist\IBLpressure\IBLpressure.exe`
   starts, connects, and Task Manager shows the child `IBLpressure.exe` while Live.
-- [ ] Unplug the T7's USB for more than 2 minutes at 1 Hz: the status line walks
+- [x] Unplug the T7's USB for more than 2 minutes at 1 Hz: the status line walks
   `Reconnecting — Reopen (attempt 1 of 3)…` → Library reset → Acquisition restart,
   then shows the Hand-off message in red; plug back in → green with
   `Recovered at … after a … s gap (<step>)` for 10 s, and the plot shows a break.
-- [ ] While in Hand-off, press Quit: the window closes in under 5 s and Task Manager
+- [x] While in Hand-off, press Quit: the window closes in under 5 s and Task Manager
   shows no `IBLpressure.exe` left. Relaunch connects without a reboot.
-- [ ] `link-log\YYYY-MM.log` reads as a clear story of the above (LINK_UP with
+- [x] `link-log\YYYY-MM.log` reads as a clear story of the above (LINK_UP with
   firmware and LJM version, the climb, one HAND_OFF, REPEATED lines, RECOVERED),
   and the Connection frame shows the recovery. Today's Daily CSV kept appending
   (one header) across the outage and the relaunch.
-- [ ] In Kipling (with IBL Pressure closed), the T7's watchdog shows enabled, 60 s,
+- [x] In Kipling (with IBL Pressure closed), the T7's watchdog shows enabled, 60 s,
   reset on timeout. Note anything unclear under `## Comments`.
 
 ## Gate
