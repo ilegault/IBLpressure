@@ -1,6 +1,6 @@
 # 26: Connection frame summary rolls over at midnight
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Runner:** any
 
