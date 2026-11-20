@@ -1,6 +1,7 @@
 """The window writes the Link log. Real LinkLog and file under tmp_path; fake child and clock."""
 from __future__ import annotations
 
+import datetime as _dt
 import glob
 import os
 import time
@@ -14,6 +15,7 @@ from ibl.acquisition import ReadError as ChildReadError
 from ibl.channels import CHANNELS
 from ibl.config import Settings
 from ibl.conversion import convert
+from ibl.linklog import local_day
 from ibl.mainwindow import MainWindow
 from ibl.model import Sample
 from ibl.supervisor import Supervisor
@@ -182,3 +184,47 @@ def test_link_log_failure_is_reported(make_window, spawn, clock, tmp_path):
     assert window.topbar.lbl_status.text().startswith("Link log not written:")
     # the app keeps running: a child was still started
     assert isinstance(spawn.children[0].sent[0], Start)
+
+
+def test_summary_rolls_over_at_midnight_without_a_link_event(window, clock, qtbot):
+    window._log("RECOVERED", step="Acquisition restart", gap_s=64)
+    label = window.settings_panel.lbl_link_summary
+    assert label.text() == "Today: 1 recovery — Acquisition restart 1 · longest gap 64 s"
+
+    day_before = local_day(clock.t)
+    clock.t = (
+        _dt.datetime.fromtimestamp(clock.t, tz=_dt.UTC).astimezone()
+        + _dt.timedelta(days=1)
+    ).replace(hour=1, minute=0, second=0, microsecond=0).timestamp()
+    assert local_day(clock.t) != day_before
+
+    qtbot.waitUntil(lambda: label.text() == "Today: no recoveries", timeout=2000)
+
+    lst = window.settings_panel.lst_link_events
+    rows = [lst.item(i).text() for i in range(lst.count())]
+    assert any("RECOVERED  Acquisition restart · gap 64 s" in row for row in rows)
+
+
+def test_connection_frame_refreshes_only_when_day_changes(window, clock, monkeypatch):
+    calls = 0
+    orig = window._refresh_connection_frame
+
+    def counted():
+        nonlocal calls
+        calls += 1
+        orig()
+
+    monkeypatch.setattr(window, "_refresh_connection_frame", counted)
+
+    window._refresh_connection_frame_on_new_day()
+    assert calls == 0
+
+    clock.t = (
+        _dt.datetime.fromtimestamp(clock.t, tz=_dt.UTC).astimezone()
+        + _dt.timedelta(days=1)
+    ).replace(hour=1, minute=0, second=0, microsecond=0).timestamp()
+    window._refresh_connection_frame_on_new_day()
+    assert calls == 1
+
+    window._refresh_connection_frame_on_new_day()
+    assert calls == 1

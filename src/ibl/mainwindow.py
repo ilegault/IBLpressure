@@ -47,7 +47,7 @@ from .csvlogger import DailyCsvLogger, load_recent_history
 from .escalation import Attempt, Step
 from .history import History
 from .link import LinkMonitor, LinkState, Recovery
-from .linklog import LinkLog
+from .linklog import LinkLog, local_day
 from .model import Sample
 from .supervisor import Down, NewSample, ReadError, Reconnecting, Supervisor, Up
 from .theme import DARK_THEME, LIGHT_THEME
@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         self._building = True
         # True once the user has pressed Connect.  Nothing connects on its own.
         self._link_wanted = False
+        self._connection_frame_day = ""
 
         self.setWindowTitle(f"IBL Pressure  -  Beamline Vacuum Monitor  v{__version__}")
         self.resize(1500, 880)
@@ -96,6 +97,7 @@ class MainWindow(QMainWindow):
         # Ages the status line and the STALE table even when no event arrives.
         self._link_timer = QTimer(self, interval=500)
         self._link_timer.timeout.connect(self._render_link)
+        self._link_timer.timeout.connect(self._refresh_connection_frame_on_new_day)
         self._link_timer.start()
         self._render_link()
 
@@ -278,8 +280,15 @@ class MainWindow(QMainWindow):
         self._refresh_connection_frame()
 
     def _refresh_connection_frame(self) -> None:
+        now = self._now()
+        self._connection_frame_day = local_day(now)
         self.settings_panel.show_connection(
-            self.linklog.summary(self._now()), self.linklog.recent(CONNECTION_FRAME_EVENTS))
+            self.linklog.summary(now), self.linklog.recent(CONNECTION_FRAME_EVENTS))
+
+    def _refresh_connection_frame_on_new_day(self) -> None:
+        """The summary says "Today"; redraw it when the local day changes even if the Link is quiet."""
+        if local_day(self._now()) != self._connection_frame_day:
+            self._refresh_connection_frame()
 
     def _connection_text(self) -> str:
         s = self.settings

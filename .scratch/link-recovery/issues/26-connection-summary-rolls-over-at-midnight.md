@@ -1,6 +1,6 @@
 # 26: Connection frame summary rolls over at midnight
 
-**Status:** in-progress
+**Status:** done
 
 **Runner:** any
 
@@ -65,11 +65,11 @@ The tests come first and must be seen failing. May fake: the clock (`window._now
 `clock` fixture in `tests/test_window_linklog.py`). Must be real: `LinkLog`, the
 month file under `tmp_path`, and the window's own `_link_timer`.
 
-- [ ] `tests/test_linklog.py::test_local_day_is_the_operators_calendar_day` asserts
+- [x] `tests/test_linklog.py::test_local_day_is_the_operators_calendar_day` asserts
   `local_day(_ts(2026, 10, 30, 23, 59, 59)) == "2026-10-30"`,
   `local_day(_ts(2026, 10, 31, 0, 0, 0)) == "2026-10-31"` and
   `local_day(_ts(2026, 11, 1, 0, 0, 0)) == "2026-11-01"`.
-- [ ] `tests/test_window_linklog.py::test_summary_rolls_over_at_midnight_without_a_link_event(window, clock, qtbot)`
+- [x] `tests/test_window_linklog.py::test_summary_rolls_over_at_midnight_without_a_link_event(window, clock, qtbot)`
   logs `window._log("RECOVERED", step="Acquisition restart", gap_s=64)`, asserts
   `settings_panel.lbl_link_summary.text() == "Today: 1 recovery — Acquisition restart 1 · longest gap 64 s"`,
   then moves `clock.t` to 01:00 local time on the next day:
@@ -79,13 +79,13 @@ month file under `tmp_path`, and the window's own `_link_timer`.
   `qtbot.waitUntil(lambda: label.text() == "Today: no recoveries", timeout=2000)`.
   After moving the clock, no window method may be called by hand: the real
   `_link_timer` must cause the change.
-- [ ] The same test asserts that one row of `settings_panel.lst_link_events` still
+- [x] The same test asserts that one row of `settings_panel.lst_link_events` still
   contains `RECOVERED  Acquisition restart · gap 64 s` (the event list is history and
   is not cleared at midnight).
-- [ ] `LinkLog.summary` uses `local_day`. `_refresh_connection_frame_on_new_day` calls
+- [x] `LinkLog.summary` uses `local_day`. `_refresh_connection_frame_on_new_day` calls
   `_refresh_connection_frame` only when `local_day(now)` differs from
   `self._connection_frame_day`.
-- [ ] Existing Connection frame and Link log tests still pass, including
+- [x] Existing Connection frame and Link log tests still pass, including
   `tests/test_panels.py::test_frame_shows_todays_summary` and
   `::test_frame_survives_restart` (no test: CI's full suite).
 
@@ -109,3 +109,12 @@ pytest runs on the touched test files only; CI runs the full suite on the PR.
 
 2026-11-20: Filed after a photo of the lab PC showed the 2026-10-30 recovery still
 counted under "Today" three weeks later.
+
+2026-11-20: Added pure `local_day(now)` in `src/ibl/linklog.py` (used by
+`LinkLog.summary`) and wired `MainWindow._refresh_connection_frame_on_new_day` to
+`_link_timer.timeout` in `src/ibl/mainwindow.py` so the Connection frame summary
+refreshes only when `local_day(self._now())` changes from
+`self._connection_frame_day`. Covered by
+`test_local_day_is_the_operators_calendar_day`,
+`test_summary_rolls_over_at_midnight_without_a_link_event`, and
+`test_connection_frame_refreshes_only_when_day_changes`.
