@@ -118,3 +118,5 @@ refreshes only when `local_day(self._now())` changes from
 `test_local_day_is_the_operators_calendar_day`,
 `test_summary_rolls_over_at_midnight_without_a_link_event`, and
 `test_connection_frame_refreshes_only_when_day_changes`.
+
+CI red from master, not this ticket: ruff RUF100 on `src/ibl/csvlogger.py`, `tests/test_csvlogger.py`, and `tests/test_linklog.py:13` (5 errors). First red at `7a38a83` (direct push, no PR). Re-run CI once master is green: `gh run rerun 44820814627`.
