@@ -5,7 +5,7 @@ import datetime as _dt
 import os
 
 from ibl import config
-from ibl.linklog import LinkLog
+from ibl.linklog import LinkLog, local_day
 
 
 def _ts(year, month, day, hour=0, minute=0, second=0) -> float:
@@ -169,3 +169,9 @@ def test_write_failure_is_reported(tmp_path):
     log.reconfigure(str(tmp_path / "good"))
     assert log.record(_ts(2026, 10, 7, 9, 1), "CONNECT") is True
     assert log.last_error == ""
+
+
+def test_local_day_is_the_operators_calendar_day():
+    assert local_day(_ts(2026, 10, 30, 23, 59, 59)) == "2026-10-30"
+    assert local_day(_ts(2026, 10, 31, 0, 0, 0)) == "2026-10-31"
+    assert local_day(_ts(2026, 11, 1, 0, 0, 0)) == "2026-11-01"

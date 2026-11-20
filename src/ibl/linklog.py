@@ -38,6 +38,11 @@ def _local(now: float) -> datetime:
     return datetime.fromtimestamp(now, tz=UTC).astimezone()
 
 
+def local_day(now: float) -> str:
+    """The operator's calendar day for `now`, as `YYYY-MM-DD` (the prefix of every log line)."""
+    return f"{_local(now):%Y-%m-%d}"
+
+
 class LinkLog:
     def __init__(self, directory: str):
         self._directory = directory
@@ -131,7 +136,7 @@ class LinkLog:
         """`Today: 3 recoveries — Reopen 2, Library reset 1 · longest gap 42 s`."""
         local = _local(now)
         path = os.path.join(self.folder, f"{local:%Y-%m}.log")
-        today = f"{local:%Y-%m-%d} "
+        today = f"{local_day(now)} "
         counts: dict[str, int] = {}
         longest = 0.0
         total = 0
