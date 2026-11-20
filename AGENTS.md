@@ -157,38 +157,21 @@ your own PR). Its rules are the ticket-engine's runner-agnostic ticket skill:
 <!-- ACTIVE-PLAN:START -->
 ## Active implementation plan
 
-_Written by the planning model on 2026-10-07 20:15. Implement this. If something in it is wrong, say so before changing course._
+_Written by the planning model on 2026-11-20 21:08. Implement this. If something in it is wrong, say so before changing course._
 
-# Link recovery — automatic Escalation, acquisition in its own process, Link log
+# Connection frame summary rolls over at midnight — ticket 26
 
 This is a pointer, not the work.
 
-- **Spec:** `.scratch/link-recovery/spec.md`
-- **Binding ADRs:** `docs/adr/0001-tests-first.md`, `docs/adr/0003-acquisition-in-its-own-process.md`
-- **New glossary terms (CONTEXT.md):** Escalation, Reopen, Library reset, Acquisition restart, Device watchdog, Link log
-- **Tickets:** 14–25 in `.scratch/link-recovery/issues/`
+- **Ticket:** `.scratch/link-recovery/issues/26-connection-summary-rolls-over-at-midnight.md` (the whole work order is there)
+- **Binding ADRs:** `docs/adr/0001-tests-first.md`
 - **Tracker conventions:** `docs/agents/issue-tracker.md`
 
-**Next:** 14, 15, 16 have no blockers. Start with **14** (Escalation core): 18 and 19 both wait on it, and it is a pure core with the clearest tests. 15 and 16 can run in parallel.
-
-Dependency graph:
-
-```
-14 ─┬─> 18 ─────────────┐
-    └─> 19 <── 16 ──> 17 ┤
-             19 ─────────┴─> 20 ─┬─> 21 (needs 15) ─> 22 ─> 23 ─> 25 [ready-for-developer: bench check]
-15 ──────────────────────────────┘                └─> 24 [held: Auto-merge no, AGENTS.md]
-```
+**Next:** 26. It has no blockers and is the only `ready-for-agent` ticket.
 
 Requirements an implementer would quietly treat as preferences — they are not:
 
-- `acquisition.py`, `supervisor.py`, `escalation.py`, `linklog.py` import no PySide6/pyqtgraph; cores take `now`, never `time.time()`.
-- The child never retries on its own; only the Supervisor (via Escalation) decides.
-- The window never waits on LJM: no `BlockingQueuedConnection`, no unbounded `join`.
-- Watchdog `_DEFAULT` registers are written only when they differ (flash wear).
-- Status texts are verbatim from spec §2 *Status texts*; every timing is a `config.py` constant.
-- Link log write failures are reported, never swallowed (AGENTS.md rule 7).
-- History, plot and the Daily CSV system are not changed.
-
-Deliberately not done: Windows USB device reset, Ethernet migration, alerts beyond the screen and the Link log.
+- `local_day(now)` lives in `linklog.py` and is pure; the window does no date arithmetic of its own.
+- The Link log is re-read only when the local day changes, never on every 500 ms tick.
+- The test is driven by the real `_link_timer`; no window method is called by hand after the clock moves.
 <!-- ACTIVE-PLAN:END -->
