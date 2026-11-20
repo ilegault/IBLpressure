@@ -1,6 +1,6 @@
 # 27: Pin ruff and enable the DTZ and BLE rules the code already annotates
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Runner:** any
 
@@ -58,18 +58,18 @@ exactly the kind of date bug that ticket 26 fixed.
 
 ## Acceptance criteria
 
-- [ ] After `pip install -e .[dev]`, `ruff --version` prints `ruff 0.17.6`, and
+- [x] After `pip install -e .[dev]`, `ruff --version` prints `ruff 0.17.6`, and
   `ruff check .` prints `All checks passed!` with the five `# noqa: DTZ…` comments still
   in place (`grep -c "noqa: DTZ" src/ibl/csvlogger.py` is 3; the two test files each
   still contain theirs).
-- [ ] The rules are really enforced. Write a scratch file outside the repo containing
+- [x] The rules are really enforced. Write a scratch file outside the repo containing
   `import datetime` and `datetime.datetime.now()`. Run
   `ruff check <that file> --config pyproject.toml` from the repo root: it reports
   `DTZ005`. Paste that output line into this ticket's `## Comments`, then delete the file.
-- [ ] `python scripts/check_tests_first.py` passes. The change touches neither `src/`
+- [x] `python scripts/check_tests_first.py` passes. The change touches neither `src/`
   nor `main.py`, so no test change is required, and none is made.
-- [ ] Existing tests still pass (no test: CI's full suite).
-- [ ] The PR description says that PR #14 (ticket 26) must be updated from `master`
+- [x] Existing tests still pass (no test: CI's full suite).
+- [x] The PR description says that PR #14 (ticket 26) must be updated from `master`
   after this merges. Re-running its old CI run would reuse the old merge commit and
   stay red.
 
